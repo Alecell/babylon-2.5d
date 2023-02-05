@@ -2,6 +2,7 @@ const fs = require('fs');
 const getLogger = require('webpack-log');
 const path = require('path');
 const log = getLogger({ name: 'webpack-batman' });
+const { Compilation, sources } = require('webpack');
 
 const PLUGIN_NAME = 'BabylonJSPlugin';
 const GET_SCENE_LOADER_METHODS_PATH_REGEX = /SceneLoader\.ImportMeshAsync\(\s*['"].*['"],\s*['"](?<path>.*)['"],\s*['"](?<fileName>.*)['"],\s*.*\)/gm
@@ -45,7 +46,7 @@ class BabylonJSPlugin {
     });
   }
 
-  async copyFilesToDist(files, filesPath, distPath) {
+  async copyFilesToOutputFolder(files, filesPath, distPath) {
     const copyPromises = files.map(file => this.createFoldersAndCopyFile(`${filesPath}${file}`, `${distPath}${file}`))
     return Promise.all(copyPromises);
   }
@@ -70,7 +71,7 @@ class BabylonJSPlugin {
     while (match) {
       const files = await this.findMeshAndTextures(scriptPath, match);
       const distPath = path.normalize(`${process.cwd()}/dist/${match.path}`);
-      await this.copyFilesToDist(files, path.normalize(`${scriptPath}${match.path}`), distPath);
+      await this.copyFilesToOutputFolder(files, path.normalize(`${scriptPath}${match.path}`), distPath);
       match = regExp.exec(content)?.groups;
     }
   }
@@ -106,8 +107,43 @@ class BabylonJSPlugin {
     callback();
   }
 
+  // with webpack 5 plugin development how can I make changes on a .ts file before it gets compiled by webpack?
+  repathSceneLoadersCalls(compilation, aqui) {
+    // console.log('compilation', compilation)
+    // console.log('aqui', aqui)
+
+    // console.log(compilation.assets)
+
+    compilation.hooks.buildModule.tap(PLUGIN_NAME, async (module, otherModule) => {
+      if (module.resource && module.resource.endsWith('.ts') && !/node_modules/.test(module.resource) && module._source) {
+        const fs = compilation.inputFileSystem;
+        console.log(module)
+
+        const data = await fs.readFileSync(module.resource, 'utf-8');
+
+        console.log(module._source._value);
+        module._source._value = data.replace('// BATATA', 'const ROLE = "BATATA"')
+        console.log(module._source._value);
+      }
+    });
+
+    // aqui.normalModuleFactory.hooks.beforeResolve.tap(PLUGIN_NAME, (sim, ali, nao) => {
+    //   console.log('normalModuleFactory.beforeResolve', sim)
+    //   console.log('normalModuleFactory.beforeResolve', ali)
+    //   console.log('normalModuleFactory.beforeResolve', sim)
+    // })
+
+    // aqui.contextModuleFactory.hooks.beforeResolve.tap(PLUGIN_NAME, (nao, ali, xim) => {
+    //   console.log('contextModuleFactory.beforeResolve', nao)
+    //   console.log('contextModuleFactory.beforeResolve', ali)
+    //   console.log('contextModuleFactory.beforeResolve', xim)
+    // })
+  }
+
   apply(compiler) {
-    compiler.hooks.afterEmit.tapAsync(PLUGIN_NAME, this.copy3DModelsAndTexturesToDist.bind(this));
+    // console.log('compiler', compiler)
+    compiler.hooks.compilation.tap(PLUGIN_NAME, this.repathSceneLoadersCalls.bind(this))
+    // compiler.hooks.afterEmit.tapAsync(PLUGIN_NAME, this.copy3DModelsAndTexturesToDist.bind(this));
   }
 }
 
