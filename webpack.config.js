@@ -1,9 +1,6 @@
 const path = require("path");
 const fs = require("fs");
-const CopyWebpackPlugin = require('copy-webpack-plugin');
 const HtmlWebpackPlugin = require("html-webpack-plugin");
-const StringReplacePlugin = require('string-replace-webpack-plugin');
-const BabylonJSPlugin = require('./BabylonJSPlugin');
 const appDirectory = fs.realpathSync(process.cwd());
 
 module.exports = {

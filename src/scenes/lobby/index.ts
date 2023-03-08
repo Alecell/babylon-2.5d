@@ -1,15 +1,23 @@
-import { ArcRotateCamera, Engine, HemisphericLight, MeshBuilder, Scene, SceneLoader, Vector3 } from '@babylonjs/core';
-import { Player } from '../../prefabs/Player/Player';
+import { AmmoJSPlugin, Engine, HemisphericLight, Scene, Vector3 } from '@babylonjs/core';
+import { createGround } from '../../prefabs/Ground/Ground';
+import { createPlayer } from '../../prefabs/Player/Player';
+import { meshLoader } from '../../utils/meshLoader';
 
 export async function Lobby(engine: Engine, canvas: HTMLCanvasElement) {
   const scene = new Scene(engine);
+  const physicsPlugin = new AmmoJSPlugin(false);
+  const gravityVector = new Vector3(0, -100, 0);
 
-  const camera = new ArcRotateCamera("Camera", Math.PI / 2, Math.PI / 2, 2, Vector3.Zero(), scene);
   new HemisphericLight("light1", new Vector3(1, 1, 0), scene);
+  scene.enablePhysics(gravityVector, physicsPlugin);
 
-  await Player(scene);
-  // MeshBuilder.CreateSphere("sphere", { diameter: 1 }, scene);
-  camera.attachControl(canvas, true);
+  const [
+    Player,
+    Ground
+  ] = await meshLoader([
+    createPlayer(scene),
+    createGround(scene)
+  ]);
 
   return scene;
 }
