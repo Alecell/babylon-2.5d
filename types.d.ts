@@ -1,6 +1,12 @@
-declare module '*.babylon' {
-  const content: string;
-  export default content;
-}
+// Images
+declare module '*.jpg';
+declare module '*.png';
+declare module '*.env';
 
-declare var Ammo: Promise;
+// 3D types
+declare module '*.glb';
+declare module '*.babylon';
+declare module '*.stl';
+
+// Physics
+declare module "ammo.js";

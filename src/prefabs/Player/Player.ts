@@ -1,56 +1,71 @@
-import { AbstractMesh, Axis, ISceneLoaderAsyncResult, Mesh, PhysicsImpostor, Scene, SceneLoader } from '@babylonjs/core';
-import { APrefab } from '../../interfaces/Prefab';
-import { Camera } from './Camera';
-import { Controls } from './Controls';
-import { Animation } from './Animation';
-import { TGenericObject } from '../../utils/types';
+import {
+  ISceneLoaderAsyncResult,
+  Mesh,
+  MeshBuilder,
+  Scene,
+  SceneLoader,
+  StandardMaterial,
+  Vector3,
+} from "@babylonjs/core";
 
-class Player extends APrefab {
+import { MeshGroup, Prefab } from "../../interfaces/prefab";
+
+import { Camera } from "./Camera";
+import { Controls } from "./Controls";
+import { Animation } from "./Animation";
+import player from "./player.glb";
+
+class Player extends Prefab {
   private _controls!: Controls;
   private _camera!: Camera;
   private _animation!: Animation;
-  protected _mesh: TGenericObject<Mesh>;
 
   constructor(loaded: ISceneLoaderAsyncResult, scene: Scene) {
     super("Player", scene);
 
     this._mesh = this.initMeshes(loaded);
-    this._mesh["Third Person"].position.z = 1;
-    
+    console.log(this._mesh);
     this._skeleton = loaded.skeletons[0];
-    
-    this._camera = new Camera(this._mesh["Third Person"], this.scene);
-    this._animation = new Animation(this._skeleton, this.scene);
-    this._controls = new Controls(this._mesh["Third Person"], this._animation, this.scene);
-    
-    this.initPhysics();
-    this.freezeRotation(this._mesh["Third Person"]);
+
+    // this._camera = new Camera(this._mesh.base, this.scene);
+    // this._animation = new Animation(this._skeleton, this.scene);
+    this._controls = new Controls(this._mesh.base, this._animation, this.scene);
   }
 
   initMeshes(loaded: ISceneLoaderAsyncResult) {
-    return loaded.meshes.reduce((obj, mesh) => {
+    const meshes = loaded.meshes.reduce((obj, mesh) => {
       return {
         ...obj,
         [mesh.name]: mesh as Mesh,
-      }
-    }, {});
-  }
+      };
+    }, {} as MeshGroup);
 
-  initPhysics() {
-    this._mesh["Third Person"].physicsImpostor = new PhysicsImpostor(
-      this._mesh["Third Person"],
-      PhysicsImpostor.BoxImpostor,
-      { mass: 20, restitution: 0, friction: 0.5 },
-      this.scene
-    );
+    meshes.base = MeshBuilder.CreateCapsule("Player", {}, this.scene);
+    meshes.base.position = new Vector3(4, -2.5, 0.99);
+    meshes.base.addChild(meshes["__root__"]);
+    meshes["__root__"].scaling = new Vector3(-0.23, -0.23, -0.23);
+    meshes["__root__"].position = new Vector3(0, -0.5, 0);
+
+    const material = new StandardMaterial("playerBaseMaterial", this.scene);
+    material.alpha = 0;
+    meshes.base.material = material;
+
+    return meshes;
   }
 
   async initSounds() {
-    throw new Error('Method not implemented.');
+    throw new Error("Method not implemented.");
   }
 }
 
 export const createPlayer = async (scene: Scene) => {
-  const loaded = await SceneLoader.ImportMeshAsync("", "/meshes/player/", "dummy2.babylon", scene);
+  const loaded = await SceneLoader.ImportMeshAsync(
+    "",
+    "",
+    player,
+    scene,
+    null,
+    ".glb"
+  );
   return new Player(loaded, scene);
 };
