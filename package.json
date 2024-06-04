@@ -43,6 +43,7 @@
     "@babylonjs/inspector": "^6.29.0",
     "@babylonjs/loaders": "^6.29.0",
     "@babylonjs/materials": "^6.29.0",
-    "@babylonjs/serializers": "^6.29.0"
+    "@babylonjs/serializers": "^6.29.0",
+    "decimal.js": "^10.4.3"
   }
 }

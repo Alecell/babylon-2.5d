@@ -13,8 +13,7 @@ import fase from "./fase.babylon";
 
 export class Ground extends Prefab {
   constructor(loaded: ISceneLoaderAsyncResult, scene: Scene) {
-    super("Ground", scene);
-
+    super("Ground", scene, false);
     this.initMeshes(loaded);
   }
 
@@ -24,7 +23,9 @@ export class Ground extends Prefab {
     loaded.meshes[0].position.x = 60;
     loaded.meshes[0].position.y = -3;
     loaded.meshes[0].position.z = 1;
-    loaded.meshes[0].scaling.x = 0.4;
+    loaded.meshes[0].scaling.x = 2;
+    loaded.meshes[0].scaling.z = 2;
+    loaded.meshes[0].scaling.y = 2;
 
     this._mesh = { base: loaded.meshes[0] as Mesh };
   }

@@ -7,6 +7,7 @@ import {
   Vector3,
 } from "@babylonjs/core";
 import { Animation } from "./Animation";
+import { Physics } from "../../utils/physics/physics";
 
 export class Controls {
   speed = 5;
@@ -17,6 +18,7 @@ export class Controls {
   constructor(
     private mesh: Mesh,
     private animation: Animation,
+    protected physics: Physics,
     scene: Scene
   ) {
     scene.actionManager = new ActionManager(scene);

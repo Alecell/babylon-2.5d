@@ -29,26 +29,15 @@ export abstract class Prefab {
 
   constructor(
     public name: string,
-    protected scene: Scene
+    protected readonly scene: Scene,
+    physics = true
   ) {
-    this._physics = new Physics(this, this.scene);
+    if (physics) this._physics = new Physics(this, this.scene);
   }
 
   abstract initSounds(): Promise<void>;
 
   get mesh() {
     return this._mesh;
-  }
-
-  set mesh(mesh: MeshGroup) {
-    // Isso não faz sentido estar aqui, ta chumbado o shader, nao deveria, deveria?
-    NodeMaterial.ParseFromFileAsync(
-      `${this.name}-material`,
-      "/node-materials/genshin-shader-lindao.json",
-      this.scene
-    ).then((material) => {
-      mesh.base.material = material;
-      this._mesh = mesh;
-    });
   }
 }
