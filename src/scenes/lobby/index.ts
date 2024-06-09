@@ -23,19 +23,23 @@ export async function Lobby(engine: Engine, canvas: HTMLCanvasElement) {
     createGround(scene),
   ]);
 
-  var catmullRom = Curve3.CreateCatmullRomSpline(
-    [
-      Vector3.Zero(),
-      new Vector3(10, 0, 5),
-      new Vector3(20, 0, 20),
-      new Vector3(25, 0, 15),
-      new Vector3(35, 0, 0),
-      new Vector3(50, 0, 20),
-    ],
-    60
-  );
+  const points = [
+    Vector3.Zero(),
+    new Vector3(18.9, 0, 6.52),
+    new Vector3(41.6, 0, 17.49),
+    new Vector3(66.3, 0, -3.14),
+    new Vector3(86.23, 0, -6.14),
+    new Vector3(106.23, 0, -8.83),
+  ];
 
-  gameStore.map = new Map("lobby", catmullRom, scene);
+  var catmullRom = Curve3.CreateCatmullRomSpline(points, 60);
+
+  points.forEach((point) => {
+    const sphere = MeshBuilder.CreateSphere("point", { diameter: 0.5 }, scene);
+    sphere.position = point;
+  });
+
+  gameStore.map = new Map("lobby", catmullRom, new Vector3(0, 23, 0), scene);
 
   var catmullRomSpline = MeshBuilder.CreateLines(
     "catmullRom",

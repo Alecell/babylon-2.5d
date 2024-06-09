@@ -1,11 +1,24 @@
-import { Ray, RayHelper, Scene, Vector3 } from "@babylonjs/core";
+import {
+  Nullable,
+  PickingInfo,
+  Ray,
+  RayHelper,
+  Scene,
+  Vector3,
+} from "@babylonjs/core";
 
 import { Prefab } from "../../interfaces/prefab";
-import { Orientation, Positions } from "./physics.types";
+import { Positions } from "./physics.types";
 import { gameStore } from "../../store/game";
+import { createRay, getPosition } from "./raycast";
+
+/**
+ * TODO: O jogador não deve poder subir qualquer rampa, a pesar de que provavelmente no jogo não haverá nenhum caminho bloqueado... Será?
+ */
 
 export class Physics {
   isGrounded = false;
+  mapPoint = 0;
   groundedDistance!: number;
 
   frontRc!: Ray;
@@ -15,8 +28,8 @@ export class Physics {
 
   frontRcPosition: Positions = "right";
   backRcPosition: Positions = "left";
-  groundFrontRcPosition: Positions = "left";
-  groundBackRcPosition: Positions = "right";
+  groundFrontRcPosition: Positions = "right";
+  groundBackRcPosition: Positions = "left";
 
   constructor(
     private readonly prefab: Prefab,
@@ -26,56 +39,30 @@ export class Physics {
     scene.onBeforeRenderObservable.add(this.applyPhysics);
   }
 
-  applyPhysics = () => {
-    this.updateRaysPosition();
-    this.checkGrounded();
-
-    if (!this.isGrounded) this.applyGravity();
-  };
-
-  checkGrounded = () => {
-    const threshold = 0.2;
-    const groundFrontHit = this.scene.pickWithRay(this.groundFrontRc);
-    const groundBackHit = this.scene.pickWithRay(this.groundBackRc);
-
-    /**
-     * TODO: Isso aqui precisa verificar se o objeto
-     * é de uma certa tag, tipo ou coisa assim
-     * Não é qualquer objeto que é chão, pode ser agua
-     * As vezes um inimigo, ou um objeto que não é chão
-     */
-    if (
-      groundFrontHit &&
-      groundBackHit &&
-      groundFrontHit?.distance - threshold <= this.groundedDistance &&
-      groundBackHit?.distance - threshold <= this.groundedDistance
-    ) {
-      this.isGrounded = true;
-    } else {
-      this.isGrounded = false;
-    }
-  };
-
-  applyGravity = () => {
-    const gravity = 0.4;
-    // this.prefab.mesh.base.position.y -= gravity;
-  };
-
-  updateRaysPosition = () => {
-    this.frontRc.origin = this.getPosition(this.frontRcPosition);
-    this.backRc.origin = this.getPosition(this.backRcPosition);
-    this.groundFrontRc.origin = this.getPosition(this.groundFrontRcPosition);
-    this.groundBackRc.origin = this.getPosition(this.groundBackRcPosition);
-  };
-
   preparePhysics = () => {
+    if (gameStore.map) {
+      this.prefab.mesh.base.position = gameStore.map.start;
+    }
+
     this.groundedDistance =
       this.prefab.mesh.base.getBoundingInfo().boundingBox.extendSizeWorld.y;
 
-    this.frontRc = this.createRay(this.frontRcPosition, "right");
-    this.backRc = this.createRay(this.backRcPosition, "left");
-    this.groundBackRc = this.createRay(this.groundBackRcPosition, "bottom");
-    this.groundFrontRc = this.createRay(this.groundFrontRcPosition, "bottom");
+    this.frontRc = createRay(
+      this.frontRcPosition,
+      "right",
+      this.prefab.mesh.base
+    );
+    this.backRc = createRay(this.backRcPosition, "left", this.prefab.mesh.base);
+    this.groundBackRc = createRay(
+      this.groundBackRcPosition,
+      "bottom",
+      this.prefab.mesh.base
+    );
+    this.groundFrontRc = createRay(
+      this.groundFrontRcPosition,
+      "bottom",
+      this.prefab.mesh.base
+    );
 
     const frontRayHelper = new RayHelper(this.frontRc);
     frontRayHelper.show(this.scene);
@@ -92,71 +79,138 @@ export class Physics {
     this.scene.onBeforeRenderObservable.removeCallback(this.preparePhysics);
   };
 
-  createRay = (position: Positions, orientation: Orientation) => {
-    const length = 20;
-    let origin = this.getPosition(position);
-    let direction = this.getOrientation(orientation);
+  applyPhysics = () => {
+    this.updateRaysPosition();
+    this.checkGrounded();
 
-    return new Ray(origin, direction, length);
+    if (!this.isGrounded) this.applyGravity();
   };
 
-  getPosition(position: Positions) {
-    let origin = this.prefab.mesh.base.position.clone();
+  updateRaysPosition = () => {
+    this.frontRc.origin = getPosition(
+      this.frontRcPosition,
+      this.prefab.mesh.base
+    );
+    this.backRc.origin = getPosition(
+      this.backRcPosition,
+      this.prefab.mesh.base
+    );
+    this.groundFrontRc.origin = getPosition(
+      this.groundFrontRcPosition,
+      this.prefab.mesh.base
+    );
+    this.groundBackRc.origin = getPosition(
+      this.groundBackRcPosition,
+      this.prefab.mesh.base
+    );
+  };
 
-    if (position === "top") {
-      origin.y =
-        this.prefab.mesh.base.position.y +
-        this.prefab.mesh.base.getBoundingInfo().boundingBox.extendSizeWorld.y;
+  checkGrounded = () => {
+    const groundFrontHit = this.scene.pickWithRay(this.groundFrontRc);
+    const groundBackHit = this.scene.pickWithRay(this.groundBackRc);
+
+    /**
+     * TODO: Isso aqui precisa verificar se o objeto
+     * é de uma certa tag, tipo ou coisa assim
+     * Não é qualquer objeto que é chão, pode ser agua
+     * As vezes um inimigo, ou um objeto que não é chão
+     */
+    if (groundFrontHit && groundBackHit) {
+      if (this.isOnGround(groundFrontHit, groundBackHit)) {
+        this.isGrounded = true;
+
+        if (this.isClippedOnGround(groundFrontHit, groundBackHit)) {
+          this.snapToGroundSurface(groundFrontHit, groundBackHit);
+        }
+      } else {
+        this.isGrounded = false;
+      }
     }
+  };
 
-    if (position === "bottom") {
-      origin.y =
-        this.prefab.mesh.base.position.y -
-        this.prefab.mesh.base.getBoundingInfo().boundingBox.extendSizeWorld.y;
+  isOnGround = (groundFrontHit: PickingInfo, groundBackHit: PickingInfo) => {
+    return (
+      groundFrontHit?.distance <= this.groundedDistance ||
+      groundBackHit?.distance <= this.groundedDistance
+    );
+  };
+
+  isClippedOnGround = (
+    groundFrontHit: PickingInfo,
+    groundBackHit: PickingInfo
+  ) => {
+    return (
+      this.groundedDistance > groundFrontHit.distance ||
+      this.groundedDistance > groundBackHit.distance
+    );
+  };
+
+  snapToGroundSurface = (
+    groundFrontHit: PickingInfo,
+    groundBackHit: PickingInfo
+  ) => {
+    const distance = Math.min(groundFrontHit.distance, groundBackHit.distance);
+    this.prefab.mesh.base.position.y += this.groundedDistance - distance;
+  };
+
+  applyGravity = () => {
+    const gravity = 0.3;
+    this.prefab.mesh.base.position.y -= gravity;
+  };
+
+  moveRight = () => {
+    if (this.prefab.properties) {
+      this.mapPoint += this.prefab.properties.speed;
+      this.moveTo(this.mapPoint);
     }
+  };
 
-    if (position === "right") {
-      origin.x =
-        this.prefab.mesh.base.position.x +
-        this.prefab.mesh.base.getBoundingInfo().boundingBox.extendSizeWorld.x;
+  moveLeft = () => {
+    if (this.prefab.properties) {
+      this.mapPoint -= this.prefab.properties.speed;
+      this.moveTo(this.mapPoint);
     }
+  };
 
-    if (position === "left") {
-      origin.x =
-        this.prefab.mesh.base.position.x -
-        this.prefab.mesh.base.getBoundingInfo().boundingBox.extendSizeWorld.x;
+  moveTo = (point: number) => {
+    if (!gameStore.map) return;
+    const points = gameStore.map?.path.getPoints();
+    const nextPointIndex = this.findNextPointIndex(points, point);
+    const nextPoint = points[nextPointIndex];
+    const nextNextPoint = points[nextPointIndex + 1];
+    if (nextPoint && nextNextPoint) {
+      const ratio =
+        (point - this.calculateArcLength(points, nextPointIndex)) /
+        Vector3.Distance(nextPoint, nextNextPoint);
+      const newPosition = Vector3.Lerp(
+        new Vector3(nextPoint.x, this.prefab.mesh.base.position.y, nextPoint.z),
+        new Vector3(
+          nextNextPoint.x,
+          this.prefab.mesh.base.position.y,
+          nextNextPoint.z
+        ),
+        ratio
+      );
+      this.prefab.mesh.base.position = newPosition;
     }
+  };
 
-    return origin;
-  }
-
-  getOrientation(orientation: Orientation) {
-    let direction = new Vector3(0, 0, 0);
-
-    if (orientation === "top") {
-      direction.y = 1;
+  findNextPointIndex = (points: Vector3[], arcLength: number) => {
+    let accumulatedLength = 0;
+    for (let i = 0; i < points.length - 1; i++) {
+      accumulatedLength += Vector3.Distance(points[i], points[i + 1]);
+      if (accumulatedLength > arcLength) {
+        return i;
+      }
     }
+    return points.length - 2; // return the second last index if the arcLength is beyond the total length
+  };
 
-    if (orientation === "bottom") {
-      direction.y = -1;
+  calculateArcLength = (points: Vector3[], endIndex: number) => {
+    let accumulatedLength = 0;
+    for (let i = 0; i < endIndex; i++) {
+      accumulatedLength += Vector3.Distance(points[i], points[i + 1]);
     }
-
-    if (orientation === "right") {
-      direction.x = 1;
-    }
-
-    if (orientation === "left") {
-      direction.x = -1;
-    }
-
-    if (orientation === "forward") {
-      direction.z = 1;
-    }
-
-    if (orientation === "backward") {
-      direction.z = -1;
-    }
-
-    return direction;
-  }
+    return accumulatedLength;
+  };
 }

@@ -1,3 +1,1 @@
-export type GenericObject<T = unknown> = {
-  [key: string]: T;
-};
+export type GenericObject<T = unknown> = Record<string, T>;

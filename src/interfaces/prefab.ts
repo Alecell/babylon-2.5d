@@ -16,6 +16,10 @@ export interface MeshGroup {
   [key: string]: Mesh;
 }
 
+interface CharacterProperties {
+  speed: number;
+}
+
 export abstract class Prefab {
   protected _mesh!: MeshGroup;
   protected _skeleton!: Skeleton;
@@ -24,8 +28,9 @@ export abstract class Prefab {
   protected _sounds!: GenericObject<Sound>;
   protected _physics!: Physics;
 
-  events: Nullable<GenericObject> = {};
-  states: Nullable<GenericObject> = {};
+  abstract properties: Nullable<CharacterProperties>;
+  events: GenericObject = {};
+  states: GenericObject = {};
 
   constructor(
     public name: string,

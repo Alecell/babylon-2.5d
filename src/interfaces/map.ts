@@ -1,4 +1,4 @@
-import { Curve3, Scene, Sound } from "@babylonjs/core";
+import { Curve3, Scene, Sound, Vector3 } from "@babylonjs/core";
 import { GenericObject } from "../types/object";
 
 export class Map {
@@ -7,7 +7,8 @@ export class Map {
 
   constructor(
     public name: string,
-    protected readonly path: Curve3,
+    public readonly path: Curve3,
+    public readonly start: Vector3,
     protected readonly scene: Scene
   ) {}
 }

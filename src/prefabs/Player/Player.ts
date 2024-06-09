@@ -20,6 +20,10 @@ class Player extends Prefab {
   private _camera!: Camera;
   private _animation!: Animation;
 
+  properties = {
+    speed: 0.3,
+  };
+
   constructor(loaded: ISceneLoaderAsyncResult, scene: Scene) {
     super("Player", scene);
 
@@ -49,7 +53,7 @@ class Player extends Prefab {
       { height: 4, radius: 1 },
       this.scene
     );
-
+    // meshes.base.position = new Vector3(0, 20, 0);
     meshes.base.addChild(meshes["__root__"]);
     meshes["__root__"].scaling = new Vector3(-1, -1, -1);
     meshes["__root__"].position = new Vector3(0, -2, 0);
