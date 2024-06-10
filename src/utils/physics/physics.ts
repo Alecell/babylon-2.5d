@@ -116,16 +116,23 @@ export class Physics {
      * As vezes um inimigo, ou um objeto que não é chão
      */
     if (groundFrontHit && groundBackHit) {
+      console.log(groundFrontHit, groundBackHit);
+      console.log(groundFrontHit.distance.toFixed(3));
+      console.log(this.prefab.mesh.base.position.y, this.groundedDistance);
+
       if (this.isOnGround(groundFrontHit, groundBackHit)) {
         this.isGrounded = true;
+        console.log("on ground");
 
         if (this.isClippedOnGround(groundFrontHit, groundBackHit)) {
           this.snapToGroundSurface(groundFrontHit, groundBackHit);
         }
       } else {
+        console.log("off ground");
         this.isGrounded = false;
       }
     }
+    console.log("--------------------------------");
   };
 
   isOnGround = (groundFrontHit: PickingInfo, groundBackHit: PickingInfo) => {
