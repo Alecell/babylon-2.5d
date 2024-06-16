@@ -1,4 +1,11 @@
-export type Positions = "top" | "bottom" | "right" | "left" | "front" | "back";
+export type Positions =
+  | "top"
+  | "bottom"
+  | "right"
+  | "left"
+  | "front"
+  | "back"
+  | "center";
 
 export type Orientation =
   | "top"
