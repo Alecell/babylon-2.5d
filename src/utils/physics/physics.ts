@@ -1,5 +1,6 @@
 import {
     AbstractMesh,
+    Nullable,
     PickingInfo,
     Ray,
     RayHelper,
@@ -17,8 +18,6 @@ import { createRay, getPosition } from "./raycast";
  * TODO O jogador não deve poder subir qualquer rampa, a pesar de que provavelmente no jogo não haverá nenhum caminho bloqueado... Será?
  *
  * TODO: Fazer o player pulas
- *
- * TODO: Fazer o teste de beirada funcionar, o player deve ser considerado no chão mesmo na pontinha da pontinha
  *
  * TODO: os raycasts laterais precisam sempre apontar para a direção do chao seja pra frente ou pra tras
  */
@@ -190,12 +189,22 @@ export class Physics {
          * quando falamos de pulo com movimentação. No futuro precisa verificar se o player está
          * no chao pra aplciar a questao da rampa que fixa o Y dele
          */
-        if (groundFrontHit && groundBackHit && baseHit) {
+        if (groundFrontHit || groundBackHit || baseHit) {
             if (this.isOnGround(groundFrontHit, groundBackHit, baseHit)) {
                 this.isGrounded = true;
 
-                if (this.isClippedOnGround(baseHit)) {
-                    this.snapToGroundSurface(baseHit);
+                if (
+                    this.isClippedOnGround(
+                        groundFrontHit,
+                        groundBackHit,
+                        baseHit
+                    )
+                ) {
+                    this.snapToGroundSurface(
+                        groundFrontHit,
+                        groundBackHit,
+                        baseHit
+                    );
                 }
             } else {
                 this.isGrounded = false;
@@ -204,13 +213,13 @@ export class Physics {
     };
 
     isOnGround = (
-        groundFrontHit: PickingInfo,
-        groundBackHit: PickingInfo,
-        baseHit: PickingInfo
+        groundFrontHit: Nullable<PickingInfo>,
+        groundBackHit: Nullable<PickingInfo>,
+        baseHit: Nullable<PickingInfo>
     ) => {
         let onGround = false;
 
-        if (baseHit.distance) {
+        if (baseHit?.hit) {
             const baseRcReachedGround =
                 this.groundedDistance.greaterThanOrEqualTo(
                     baseHit.distance - this.threshold
@@ -219,9 +228,9 @@ export class Physics {
             if (baseRcReachedGround) {
                 onGround = true;
             }
-        } else if (groundFrontHit.distance || groundBackHit.distance) {
-            const frontDistance = groundFrontHit.distance ?? 0;
-            const backDistance = groundBackHit.distance ?? 0;
+        } else if (groundFrontHit?.hit || groundBackHit?.hit) {
+            const frontDistance = groundFrontHit ? groundFrontHit.distance : 0;
+            const backDistance = groundBackHit ? groundBackHit.distance : 0;
 
             const frontRcReachedGround =
                 this.groundedDistance.greaterThanOrEqualTo(
@@ -240,16 +249,68 @@ export class Physics {
         return onGround;
     };
 
-    isClippedOnGround = (baseHit: PickingInfo) => {
-        return this.groundedDistance.greaterThan(baseHit.distance);
+    isClippedOnGround = (
+        groundFrontHit: Nullable<PickingInfo>,
+        groundBackHit: Nullable<PickingInfo>,
+        baseHit: Nullable<PickingInfo>
+    ) => {
+        let isClipped = false;
+
+        if (baseHit) {
+            isClipped = this.groundedDistance.greaterThan(baseHit.distance);
+        } else if (groundFrontHit || groundBackHit) {
+            const frontDistance = groundFrontHit ? groundFrontHit.distance : 0;
+            const backDistance = groundBackHit ? groundBackHit.distance : 0;
+
+            const frontRcReachedGround =
+                this.groundedDistance.greaterThan(frontDistance);
+            const backRcReachedGround =
+                this.groundedDistance.greaterThan(backDistance);
+
+            if (frontRcReachedGround || backRcReachedGround) {
+                isClipped = true;
+            }
+        }
+
+        return isClipped;
     };
 
-    snapToGroundSurface = (baseHit: PickingInfo) => {
-        const distance = new Decimal(baseHit.distance);
-        const prefabPositionY = new Decimal(this.prefab.mesh.base.position.y);
-        this.prefab.mesh.base.position.y = prefabPositionY
-            .plus(this.groundedDistance.minus(distance))
-            .toNumber();
+    snapToGroundSurface = (
+        groundFrontHit: Nullable<PickingInfo>,
+        groundBackHit: Nullable<PickingInfo>,
+        baseHit: Nullable<PickingInfo>
+    ) => {
+        let playerPosition = null;
+
+        if (baseHit && baseHit.hit) {
+            const distance = new Decimal(baseHit.distance);
+            const prefabPositionY = new Decimal(
+                this.prefab.mesh.base.position.y
+            );
+            playerPosition = prefabPositionY
+                .plus(this.groundedDistance.minus(distance))
+                .toNumber();
+        } else if (groundFrontHit && groundFrontHit.hit) {
+            const distance = new Decimal(groundFrontHit.distance);
+            const prefabPositionY = new Decimal(
+                this.prefab.mesh.base.position.y
+            );
+            playerPosition = prefabPositionY
+                .plus(this.groundedDistance.minus(distance))
+                .toNumber();
+        } else if (groundBackHit && groundBackHit.hit) {
+            const distance = new Decimal(groundBackHit.distance);
+            const prefabPositionY = new Decimal(
+                this.prefab.mesh.base.position.y
+            );
+            playerPosition = prefabPositionY
+                .plus(this.groundedDistance.minus(distance))
+                .toNumber();
+        }
+
+        if (playerPosition) {
+            this.prefab.mesh.base.position.y = playerPosition;
+        }
     };
 
     applyGravity = () => {
@@ -271,7 +332,6 @@ export class Physics {
     moveLeft = () => {
         if (this.prefab.properties) {
             this.mapPoint -= this.prefab.properties.speed;
-            console.log(this.mapPoint);
             this.moveTo(this.mapPoint);
         }
     };

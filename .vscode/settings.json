@@ -20,5 +20,6 @@
     "[typescript]": {
         "editor.tabSize": 4
     },
-    "todo-tree.tree.scanMode": "workspace"
+    "todo-tree.tree.scanMode": "workspace",
+    "todo-tree.tree.showBadges": true
 }

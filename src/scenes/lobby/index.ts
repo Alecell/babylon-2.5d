@@ -52,5 +52,7 @@ export async function Lobby(engine: Engine, canvas: HTMLCanvasElement) {
         scene
     );
 
+    catmullRomSpline.isPickable = false;
+
     return scene;
 }
