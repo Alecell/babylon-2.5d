@@ -1,302 +1,311 @@
 import {
-  AbstractMesh,
-  Mesh,
-  Nullable,
-  PickingInfo,
-  Ray,
-  RayHelper,
-  Scene,
-  Vector3,
-  VertexBuffer,
+    AbstractMesh,
+    PickingInfo,
+    Ray,
+    RayHelper,
+    Scene,
+    Vector3,
 } from "@babylonjs/core";
+import Decimal from "decimal.js";
 
 import { Prefab } from "../../interfaces/prefab";
 import { Positions } from "./physics.types";
 import { gameStore } from "../../store/game";
 import { createRay, getPosition } from "./raycast";
-import Decimal from "decimal.js";
 
 /**
- * TODO: O jogador não deve poder subir qualquer rampa, a pesar de que provavelmente no jogo não haverá nenhum caminho bloqueado... Será?
+ * TODO O jogador não deve poder subir qualquer rampa, a pesar de que provavelmente no jogo não haverá nenhum caminho bloqueado... Será?
+ *
+ * TODO: Fazer o player pulas
+ *
+ * TODO: Fazer o teste de beirada funcionar, o player deve ser considerado no chão mesmo na pontinha da pontinha
+ *
+ * TODO: os raycasts laterais precisam sempre apontar para a direção do chao seja pra frente ou pra tras
  */
 
 export class Physics {
-  isGrounded = false;
-  mapPoint = 0;
-  groundedDistance!: Decimal;
-  threshold = 0.001;
+    isGrounded = false;
+    mapPoint = 0;
+    groundedDistance!: Decimal;
+    threshold = 0.001;
 
-  baseRc!: Ray;
-  frontRc!: Ray;
-  backRc!: Ray;
-  groundFrontRc!: Ray;
-  groundBackRc!: Ray;
+    baseRc!: Ray;
+    frontRc!: Ray;
+    backRc!: Ray;
+    groundFrontRc!: Ray;
+    groundBackRc!: Ray;
 
-  baseRcPosition: Positions = "center";
-  frontRcPosition: Positions = "right";
-  backRcPosition: Positions = "left";
-  groundFrontRcPosition: Positions = "right";
-  groundBackRcPosition: Positions = "left";
+    baseRcPosition: Positions = "center";
+    frontRcPosition: Positions = "right";
+    backRcPosition: Positions = "left";
+    groundFrontRcPosition: Positions = "right";
+    groundBackRcPosition: Positions = "left";
 
-  constructor(
-    private readonly prefab: Prefab,
-    private readonly scene: Scene
-  ) {
-    scene.onBeforeRenderObservable.add(this.preparePhysics);
-    scene.onBeforeRenderObservable.add(this.applyPhysics);
-  }
+    constructor(
+        private readonly prefab: Prefab,
+        private readonly scene: Scene
+    ) {
+        scene.onBeforeRenderObservable.add(this.preparePhysics);
+        scene.onBeforeRenderObservable.add(this.applyPhysics);
+    }
 
-  preparePhysics = () => {
-    if (!gameStore.map) throw new Error("Map not found");
-    this.prefab.mesh.base.position = gameStore.map.start;
+    preparePhysics = () => {
+        if (!gameStore.map) throw new Error("Map not found");
+        this.prefab.mesh.base.position = gameStore.map.start;
 
-    this.groundedDistance = new Decimal(
-      this.prefab.mesh.base.getBoundingInfo().boundingBox.extendSizeWorld.y
-    );
+        this.groundedDistance = new Decimal(
+            this.prefab.mesh.base.getBoundingInfo().boundingBox.extendSizeWorld.y
+        );
 
-    this.baseRc = createRay(
-      this.baseRcPosition,
-      "bottom",
-      this.prefab.mesh.base
-    );
+        this.baseRc = createRay(
+            this.baseRcPosition,
+            "bottom",
+            this.prefab.mesh.base
+        );
 
-    this.frontRc = createRay(
-      this.frontRcPosition,
-      "right",
-      this.prefab.mesh.base
-    );
-    this.backRc = createRay(this.backRcPosition, "left", this.prefab.mesh.base);
-    this.groundBackRc = createRay(
-      this.groundBackRcPosition,
-      "bottom",
-      this.prefab.mesh.base
-    );
-    this.groundFrontRc = createRay(
-      this.groundFrontRcPosition,
-      "bottom",
-      this.prefab.mesh.base
-    );
+        this.frontRc = createRay(
+            this.frontRcPosition,
+            "right",
+            this.prefab.mesh.base
+        );
+        this.backRc = createRay(
+            this.backRcPosition,
+            "left",
+            this.prefab.mesh.base
+        );
+        this.groundBackRc = createRay(
+            this.groundBackRcPosition,
+            "bottom",
+            this.prefab.mesh.base
+        );
+        this.groundFrontRc = createRay(
+            this.groundFrontRcPosition,
+            "bottom",
+            this.prefab.mesh.base
+        );
 
-    const frontRayHelper = new RayHelper(this.frontRc);
-    frontRayHelper.show(this.scene);
+        const frontRayHelper = new RayHelper(this.frontRc);
+        frontRayHelper.show(this.scene);
 
-    const backRayHelper = new RayHelper(this.backRc);
-    backRayHelper.show(this.scene);
+        const backRayHelper = new RayHelper(this.backRc);
+        backRayHelper.show(this.scene);
 
-    const groundBackRayHelper = new RayHelper(this.groundBackRc);
-    groundBackRayHelper.show(this.scene);
+        const groundBackRayHelper = new RayHelper(this.groundBackRc);
+        groundBackRayHelper.show(this.scene);
 
-    const groundFrontRayHelper = new RayHelper(this.groundFrontRc);
-    groundFrontRayHelper.show(this.scene);
+        const groundFrontRayHelper = new RayHelper(this.groundFrontRc);
+        groundFrontRayHelper.show(this.scene);
 
-    const baseRayHelper = new RayHelper(this.baseRc);
-    baseRayHelper.show(this.scene);
+        const baseRayHelper = new RayHelper(this.baseRc);
+        baseRayHelper.show(this.scene);
 
-    this.scene.onBeforeRenderObservable.removeCallback(this.preparePhysics);
-  };
+        this.scene.onBeforeRenderObservable.removeCallback(this.preparePhysics);
+    };
 
-  applyPhysics = () => {
-    this.updateRaysPosition();
-    this.checkGrounded();
+    applyPhysics = () => {
+        this.updateRaysPosition();
+        this.checkGrounded();
 
-    // Fazer um predicado que pegue tudo, mas exclua o player em si
-    const baseHit = this.scene.pickWithRay(this.baseRc, (mesh) => {
-      // console.log(mesh);
-      return true;
-    });
-    // console.log(baseHit);
+        if (!this.isGrounded) this.applyGravity();
+    };
 
-    if (!this.isGrounded) this.applyGravity();
-  };
+    updateRaysPosition = () => {
+        this.baseRc.origin = getPosition(
+            this.baseRcPosition,
+            this.prefab.mesh.base
+        );
+        this.frontRc.origin = getPosition(
+            this.frontRcPosition,
+            this.prefab.mesh.base
+        );
+        this.backRc.origin = getPosition(
+            this.backRcPosition,
+            this.prefab.mesh.base
+        );
+        this.groundFrontRc.origin = getPosition(
+            this.groundFrontRcPosition,
+            this.prefab.mesh.base
+        );
+        this.groundBackRc.origin = getPosition(
+            this.groundBackRcPosition,
+            this.prefab.mesh.base
+        );
+    };
 
-  updateRaysPosition = () => {
-    this.baseRc.origin = getPosition(
-      this.baseRcPosition,
-      this.prefab.mesh.base
-    );
-    this.frontRc.origin = getPosition(
-      this.frontRcPosition,
-      this.prefab.mesh.base
-    );
-    this.backRc.origin = getPosition(
-      this.backRcPosition,
-      this.prefab.mesh.base
-    );
-    this.groundFrontRc.origin = getPosition(
-      this.groundFrontRcPosition,
-      this.prefab.mesh.base
-    );
-    this.groundBackRc.origin = getPosition(
-      this.groundBackRcPosition,
-      this.prefab.mesh.base
-    );
-  };
+    checkGrounded = () => {
+        const groundFrontHit = this.scene.pickWithRay(
+            this.groundFrontRc,
+            this.isGround
+        );
+        const groundBackHit = this.scene.pickWithRay(
+            this.groundBackRc,
+            this.isGround
+        );
+        const baseHit = this.scene.pickWithRay(this.baseRc, this.isGround);
 
-  checkGrounded = () => {
-    const groundFrontHit = this.scene.pickWithRay(this.groundFrontRc);
-    const groundBackHit = this.scene.pickWithRay(this.groundBackRc);
+        /**
+         * TODO: Isso aqui precisa verificar se o objeto
+         * é de uma certa tag, tipo ou coisa assim
+         * Não é qualquer objeto que é chão, pode ser agua
+         * As vezes um inimigo, ou um objeto que não é chão
+         *
+         * TODO: No futuro não podemos verificar o basehit e o groundFontHit e groundBackHit no mesmo lugar
+         *
+         * TODO: O modo de fazer o player ficar atachado a curva da rampa pode causar problemas
+         * quando falamos de pulo com movimentação. No futuro precisa verificar se o player está
+         * no chao pra aplciar a questao da rampa que fixa o Y dele
+         */
+        if (groundFrontHit && groundBackHit && baseHit) {
+            if (this.isOnGround(groundFrontHit, groundBackHit, baseHit)) {
+                this.isGrounded = true;
+
+                if (this.isClippedOnGround(baseHit)) {
+                    this.snapToGroundSurface(baseHit);
+                }
+            } else {
+                this.isGrounded = false;
+            }
+        }
+    };
+
+    isOnGround = (
+        groundFrontHit: PickingInfo,
+        groundBackHit: PickingInfo,
+        baseHit: PickingInfo
+    ) => {
+        let onGround = false;
+
+        if (baseHit.distance) {
+            const baseRcReachedGround =
+                this.groundedDistance.greaterThanOrEqualTo(
+                    baseHit.distance - this.threshold
+                );
+
+            if (baseRcReachedGround) {
+                onGround = true;
+            }
+        } else if (groundFrontHit.distance || groundBackHit.distance) {
+            const frontDistance = groundFrontHit.distance ?? 0;
+            const backDistance = groundBackHit.distance ?? 0;
+
+            const frontRcReachedGround =
+                this.groundedDistance.greaterThanOrEqualTo(
+                    frontDistance - this.threshold
+                );
+            const backRcReachedGround =
+                this.groundedDistance.greaterThanOrEqualTo(
+                    backDistance - this.threshold
+                );
+
+            if (frontRcReachedGround || backRcReachedGround) {
+                onGround = true;
+            }
+        }
+
+        return onGround;
+    };
+
+    isClippedOnGround = (baseHit: PickingInfo) => {
+        return this.groundedDistance.greaterThan(baseHit.distance);
+    };
+
+    snapToGroundSurface = (baseHit: PickingInfo) => {
+        const distance = new Decimal(baseHit.distance);
+        const prefabPositionY = new Decimal(this.prefab.mesh.base.position.y);
+        this.prefab.mesh.base.position.y = prefabPositionY
+            .plus(this.groundedDistance.minus(distance))
+            .toNumber();
+    };
+
+    applyGravity = () => {
+        const gravity = new Decimal(0.3);
+        this.prefab.mesh.base.position.y = new Decimal(
+            this.prefab.mesh.base.position.y
+        )
+            .minus(gravity)
+            .toNumber();
+    };
+
+    moveRight = () => {
+        if (this.prefab.properties) {
+            this.mapPoint += this.prefab.properties.speed;
+            this.moveTo(this.mapPoint);
+        }
+    };
+
+    moveLeft = () => {
+        if (this.prefab.properties) {
+            this.mapPoint -= this.prefab.properties.speed;
+            this.moveTo(this.mapPoint);
+        }
+    };
+
+    moveTo = (point: number) => {
+        if (!gameStore.map) return;
+        const points = gameStore.map?.path.getPoints();
+        const nextPointIndex = this.findNextPointIndex(points, point);
+        const nextPoint = this.findPoint(points[nextPointIndex]);
+        const nextNextPoint = this.findPoint(points[nextPointIndex + 1]);
+        if (nextPoint && nextNextPoint) {
+            const ratio =
+                (point - this.calculateArcLength(points, nextPointIndex)) /
+                Vector3.Distance(nextPoint, nextNextPoint);
+            const newPosition = Vector3.Lerp(nextPoint, nextNextPoint, ratio);
+            this.prefab.mesh.base.position = newPosition;
+        }
+    };
+
+    findNextPointIndex = (points: Vector3[], arcLength: number) => {
+        let accumulatedLength = 0;
+        for (let i = 0; i < points.length - 1; i++) {
+            accumulatedLength += Vector3.Distance(points[i], points[i + 1]);
+            if (accumulatedLength > arcLength) {
+                return i;
+            }
+        }
+        return points.length - 2; // return the second last index if the arcLength is beyond the total length
+    };
+
+    findPoint = (point: Vector3) => {
+        const prefabNextPoint = new Vector3(
+            point.x,
+            this.prefab.mesh.base.position.y,
+            point.z
+        );
+
+        const slopeRay = new Ray(prefabNextPoint, Vector3.Down(), 20);
+        const hit = this.scene.pickWithRay(slopeRay, this.isGround);
+
+        if (hit && hit.distance) {
+            const distance = new Decimal(hit.distance);
+            const slopeDistance = distance.minus(this.groundedDistance);
+
+            if (!slopeDistance.equals(0)) {
+                const prefabNextPointY = new Decimal(prefabNextPoint.y);
+                prefabNextPoint.y = prefabNextPointY
+                    .minus(slopeDistance)
+                    .toNumber();
+                return prefabNextPoint;
+            }
+        }
+
+        return prefabNextPoint;
+    };
 
     /**
-     * TODO: Isso aqui precisa verificar se o objeto
-     * é de uma certa tag, tipo ou coisa assim
-     * Não é qualquer objeto que é chão, pode ser agua
-     * As vezes um inimigo, ou um objeto que não é chão
+     * TODO: O modo de verificação do chao baseado no `name` é muito ruim
+     * preciso colocar algo baseado em Tags ou Metadata
      */
-    if (groundFrontHit && groundBackHit) {
-      // console.log(groundFrontHit.getNormal());
-      // console.log(groundFrontHit, groundBackHit);
-      // console.log(
-      //   this.prefab.mesh.base.position.y,
-      //   this.groundedDistance.toNumber()
-      // );
+    isGround = (mesh: AbstractMesh) => {
+        if (mesh.name === "Plane") return true;
+        return false;
+    };
 
-      if (this.isOnGround(groundFrontHit, groundBackHit)) {
-        this.isGrounded = true;
-        // console.log("on ground");
-
-        if (this.isClippedOnGround(groundFrontHit, groundBackHit)) {
-          this.snapToGroundSurface(groundFrontHit, groundBackHit);
+    calculateArcLength = (points: Vector3[], endIndex: number) => {
+        let accumulatedLength = 0;
+        for (let i = 0; i < endIndex; i++) {
+            accumulatedLength += Vector3.Distance(points[i], points[i + 1]);
         }
-      } else {
-        // console.log("off ground");
-        this.isGrounded = false;
-      }
-    }
-    // console.log("--------------------------------");
-  };
-
-  isOnGround = (groundFrontHit: PickingInfo, groundBackHit: PickingInfo) => {
-    return (
-      this.groundedDistance.greaterThanOrEqualTo(
-        groundFrontHit.distance - this.threshold
-      ) ||
-      this.groundedDistance.greaterThanOrEqualTo(
-        groundBackHit.distance - this.threshold
-      )
-    );
-  };
-
-  isClippedOnGround = (
-    groundFrontHit: PickingInfo,
-    groundBackHit: PickingInfo
-  ) => {
-    return (
-      this.groundedDistance.greaterThan(groundFrontHit.distance) ||
-      this.groundedDistance.greaterThan(groundBackHit.distance)
-    );
-  };
-
-  snapToGroundSurface = (
-    groundFrontHit: PickingInfo,
-    groundBackHit: PickingInfo
-  ) => {
-    const distance = Decimal.min(
-      groundFrontHit.distance,
-      groundBackHit.distance
-    );
-    this.prefab.mesh.base.position.y = new Decimal(
-      this.prefab.mesh.base.position.y
-    )
-      .plus(this.groundedDistance.minus(distance))
-      .toNumber();
-  };
-
-  applyGravity = () => {
-    const gravity = new Decimal(0.3);
-    this.prefab.mesh.base.position.y = new Decimal(
-      this.prefab.mesh.base.position.y
-    )
-      .minus(gravity)
-      .toNumber();
-  };
-
-  moveRight = () => {
-    if (this.prefab.properties) {
-      this.mapPoint += this.prefab.properties.speed;
-      this.moveTo(this.mapPoint);
-    }
-  };
-
-  moveLeft = () => {
-    if (this.prefab.properties) {
-      this.mapPoint -= this.prefab.properties.speed;
-      this.moveTo(this.mapPoint);
-    }
-  };
-
-  moveTo = (point: number) => {
-    if (!gameStore.map) return;
-    const points = gameStore.map?.path.getPoints();
-    const nextPointIndex = this.findNextPointIndex(points, point);
-    const nextPoint = this.findPoint(points[nextPointIndex]);
-    const nextNextPoint = this.findPoint(points[nextPointIndex + 1]);
-    if (nextPoint && nextNextPoint) {
-      const ratio =
-        (point - this.calculateArcLength(points, nextPointIndex)) /
-        Vector3.Distance(nextPoint, nextNextPoint);
-      const newPosition = Vector3.Lerp(nextPoint, nextNextPoint, ratio);
-      this.prefab.mesh.base.position = newPosition;
-    }
-  };
-
-  findNextPointIndex = (points: Vector3[], arcLength: number) => {
-    let accumulatedLength = 0;
-    for (let i = 0; i < points.length - 1; i++) {
-      accumulatedLength += Vector3.Distance(points[i], points[i + 1]);
-      if (accumulatedLength > arcLength) {
-        return i;
-      }
-    }
-    return points.length - 2; // return the second last index if the arcLength is beyond the total length
-  };
-
-  findPoint = (point: Vector3) => {
-    const prefabNextPoint = new Vector3(
-      point.x,
-      this.prefab.mesh.base.position.y,
-      point.z
-    );
-
-    const slopeRay = new Ray(prefabNextPoint, Vector3.Down(), 20);
-    const hit = this.scene.pickWithRay(slopeRay, this.isGround);
-    if (hit && hit.distance) {
-      const distance = new Decimal(hit.distance);
-      const slopeDistance = distance.minus(this.groundedDistance);
-      console.log("hit", hit);
-      console.log("distance", distance.toNumber());
-      console.log("slopeDistance", slopeDistance.toNumber());
-      console.log("groundedDistance", this.groundedDistance.toNumber());
-      console.log("----------------------------------------");
-      if (slopeDistance.greaterThan(0)) {
-        const prefabNextPointY = new Decimal(prefabNextPoint.y);
-        prefabNextPoint.y = prefabNextPointY.minus(slopeDistance).toNumber();
-        return prefabNextPoint;
-      }
-
-      if (slopeDistance.lessThan(0)) {
-        const prefabNextPointY = new Decimal(prefabNextPoint.y);
-        prefabNextPoint.y = prefabNextPointY.plus(slopeDistance).toNumber();
-        return prefabNextPoint;
-      }
-    }
-
-    return prefabNextPoint;
-  };
-
-  /**
-   * TODO: O modo de verificação do chao baseado no `name` é muito ruim
-   * preciso colocar algo baseado em Tags ou Metadata
-   */
-  isGround = (mesh: AbstractMesh) => {
-    if (mesh.name === "Plane") return true;
-    return false;
-  };
-
-  calculateArcLength = (points: Vector3[], endIndex: number) => {
-    let accumulatedLength = 0;
-    for (let i = 0; i < endIndex; i++) {
-      accumulatedLength += Vector3.Distance(points[i], points[i + 1]);
-    }
-    return accumulatedLength;
-  };
+        return accumulatedLength;
+    };
 }
