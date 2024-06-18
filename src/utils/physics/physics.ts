@@ -51,7 +51,9 @@ export class Physics {
 
     preparePhysics = () => {
         if (!gameStore.map) throw new Error("Map not found");
+        if (!this.prefab.properties) throw new Error("Map not found");
         this.prefab.mesh.base.position = gameStore.map.start;
+        this.mapPoint = this.getInitialMapPoint();
 
         this.groundedDistance = new Decimal(
             this.prefab.mesh.base.getBoundingInfo().boundingBox.extendSizeWorld.y
@@ -102,6 +104,36 @@ export class Physics {
         this.scene.onBeforeRenderObservable.removeCallback(this.preparePhysics);
     };
 
+    getInitialMapPoint = () => {
+        if (!gameStore.map) return 0;
+        let closestPointIndex = 0;
+        let minDistance = Vector3.Distance(
+            gameStore.map.start,
+            gameStore.map.path.getPoints()[0]
+        );
+
+        for (let i = 1; i < gameStore.map.path.getPoints().length; i++) {
+            const distance = Vector3.Distance(
+                gameStore.map.start,
+                gameStore.map.path.getPoints()[i]
+            );
+            if (distance < minDistance) {
+                minDistance = distance;
+                closestPointIndex = i;
+            }
+        }
+
+        let mapPoint = 0;
+        for (let i = 0; i < closestPointIndex; i++) {
+            mapPoint += Vector3.Distance(
+                gameStore.map.path.getPoints()[i],
+                gameStore.map.path.getPoints()[i + 1]
+            );
+        }
+
+        return mapPoint;
+    };
+
     applyPhysics = () => {
         this.updateRaysPosition();
         this.checkGrounded();
@@ -148,6 +180,9 @@ export class Physics {
          * é de uma certa tag, tipo ou coisa assim
          * Não é qualquer objeto que é chão, pode ser agua
          * As vezes um inimigo, ou um objeto que não é chão
+         *
+         * TODO: Na mesma linha do nem tudo é chao, tambem precisamos ter uma tag
+         * para paredes, oq é e oq nao é parede, caso o contrario o player vai escalar a parede e fodase
          *
          * TODO: No futuro não podemos verificar o basehit e o groundFontHit e groundBackHit no mesmo lugar
          *
@@ -236,6 +271,7 @@ export class Physics {
     moveLeft = () => {
         if (this.prefab.properties) {
             this.mapPoint -= this.prefab.properties.speed;
+            console.log(this.mapPoint);
             this.moveTo(this.mapPoint);
         }
     };
