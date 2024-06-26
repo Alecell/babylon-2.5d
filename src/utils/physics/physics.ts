@@ -1,12 +1,4 @@
-import {
-    AbstractMesh,
-    Nullable,
-    PickingInfo,
-    Ray,
-    RayHelper,
-    Scene,
-    Vector3,
-} from "@babylonjs/core";
+import { AbstractMesh, Nullable, PickingInfo, Ray, RayHelper, Scene, Vector3 } from "@babylonjs/core";
 import Decimal from "decimal.js";
 
 import { Prefab } from "../../interfaces/prefab";
@@ -20,6 +12,8 @@ import { createRay, getPosition } from "./raycast";
  * TODO: Fazer o player pulas
  *
  * TODO: os raycasts laterais precisam sempre apontar para a direção do chao seja pra frente ou pra tras
+ *
+ * TODO: As movimentação
  */
 
 export class Physics {
@@ -40,6 +34,9 @@ export class Physics {
     groundFrontRcPosition: Positions = "right";
     groundBackRcPosition: Positions = "left";
 
+    gravity: Decimal = new Decimal(1);
+    fallSpeed = new Decimal(0);
+
     constructor(
         private readonly prefab: Prefab,
         private readonly scene: Scene
@@ -48,42 +45,27 @@ export class Physics {
         scene.onBeforeRenderObservable.add(this.applyPhysics);
     }
 
+    /**
+     * TODO: preciso me acostumar com colocar esse tipo de erro em condicional
+     * a parada é que nesses casos aqui se eu não tiver a parada tem algo MUITO errado, então
+     * essas verificação jogando erros são validas
+     */
     preparePhysics = () => {
-        if (!gameStore.map) throw new Error("Map not found");
-        if (!this.prefab.properties) throw new Error("Map not found");
-        this.prefab.mesh.base.position = gameStore.map.start;
+        if (!gameStore.map) throw new Error("[preparePhysics] Map not found");
+        if (!this.prefab.properties) throw new Error("[preparePhysics] Map not found");
+
+        const mesh = this.prefab.mesh.base;
+        const { extendSizeWorld } = mesh.getBoundingInfo().boundingBox;
+
+        mesh.position = gameStore.map.start;
         this.mapPoint = this.getInitialMapPoint();
+        this.groundedDistance = new Decimal(extendSizeWorld.y);
 
-        this.groundedDistance = new Decimal(
-            this.prefab.mesh.base.getBoundingInfo().boundingBox.extendSizeWorld.y
-        );
-
-        this.baseRc = createRay(
-            this.baseRcPosition,
-            "bottom",
-            this.prefab.mesh.base
-        );
-
-        this.frontRc = createRay(
-            this.frontRcPosition,
-            "right",
-            this.prefab.mesh.base
-        );
-        this.backRc = createRay(
-            this.backRcPosition,
-            "left",
-            this.prefab.mesh.base
-        );
-        this.groundBackRc = createRay(
-            this.groundBackRcPosition,
-            "bottom",
-            this.prefab.mesh.base
-        );
-        this.groundFrontRc = createRay(
-            this.groundFrontRcPosition,
-            "bottom",
-            this.prefab.mesh.base
-        );
+        this.baseRc = createRay(this.baseRcPosition, Vector3.Down(), mesh);
+        this.frontRc = createRay(this.frontRcPosition, Vector3.Right(), mesh);
+        this.backRc = createRay(this.backRcPosition, Vector3.Left(), mesh);
+        this.groundBackRc = createRay(this.groundBackRcPosition, Vector3.Down(), mesh);
+        this.groundFrontRc = createRay(this.groundFrontRcPosition, Vector3.Down(), mesh);
 
         const frontRayHelper = new RayHelper(this.frontRc);
         frontRayHelper.show(this.scene);
@@ -104,30 +86,25 @@ export class Physics {
     };
 
     getInitialMapPoint = () => {
-        if (!gameStore.map) return 0;
-        let closestPointIndex = 0;
-        let minDistance = Vector3.Distance(
-            gameStore.map.start,
-            gameStore.map.path.getPoints()[0]
-        );
+        if (!gameStore.map) throw new Error("[getInitialMapPoint] Map not found");
 
-        for (let i = 1; i < gameStore.map.path.getPoints().length; i++) {
-            const distance = Vector3.Distance(
-                gameStore.map.start,
-                gameStore.map.path.getPoints()[i]
-            );
+        const mapCurvePoints = gameStore.map.path.getPoints();
+        const firstMapPoint = mapCurvePoints[0];
+
+        let mapPoint = 0;
+        let closestPointIndex = 0;
+        let minDistance = Vector3.Distance(gameStore.map.start, firstMapPoint);
+
+        for (let i = 1; i < mapCurvePoints.length; i++) {
+            const distance = Vector3.Distance(gameStore.map.start, mapCurvePoints[i]);
             if (distance < minDistance) {
                 minDistance = distance;
                 closestPointIndex = i;
             }
         }
 
-        let mapPoint = 0;
         for (let i = 0; i < closestPointIndex; i++) {
-            mapPoint += Vector3.Distance(
-                gameStore.map.path.getPoints()[i],
-                gameStore.map.path.getPoints()[i + 1]
-            );
+            mapPoint += Vector3.Distance(mapCurvePoints[i], mapCurvePoints[i + 1]);
         }
 
         return mapPoint;
@@ -137,42 +114,33 @@ export class Physics {
         this.updateRaysPosition();
         this.checkGrounded();
 
-        if (!this.isGrounded) this.applyGravity();
+        if (!this.isGrounded) {
+            this.applyGravity();
+        }
+
+        if (this.isGrounded) {
+            this.fallSpeed = new Decimal(0);
+        }
     };
 
     updateRaysPosition = () => {
-        this.baseRc.origin = getPosition(
-            this.baseRcPosition,
-            this.prefab.mesh.base
-        );
-        this.frontRc.origin = getPosition(
-            this.frontRcPosition,
-            this.prefab.mesh.base
-        );
-        this.backRc.origin = getPosition(
-            this.backRcPosition,
-            this.prefab.mesh.base
-        );
-        this.groundFrontRc.origin = getPosition(
-            this.groundFrontRcPosition,
-            this.prefab.mesh.base
-        );
-        this.groundBackRc.origin = getPosition(
-            this.groundBackRcPosition,
-            this.prefab.mesh.base
-        );
+        const mesh = this.prefab.mesh.base;
+
+        this.baseRc.origin = getPosition(this.baseRcPosition, mesh);
+        this.frontRc.origin = getPosition(this.frontRcPosition, mesh);
+        this.backRc.origin = getPosition(this.backRcPosition, mesh);
+        this.groundFrontRc.origin = getPosition(this.groundFrontRcPosition, mesh);
+        this.groundBackRc.origin = getPosition(this.groundBackRcPosition, mesh);
     };
 
     checkGrounded = () => {
-        const groundFrontHit = this.scene.pickWithRay(
-            this.groundFrontRc,
-            this.isGround
-        );
-        const groundBackHit = this.scene.pickWithRay(
-            this.groundBackRc,
-            this.isGround
-        );
+        const groundFrontHit = this.scene.pickWithRay(this.groundFrontRc, this.isGround);
+        const groundBackHit = this.scene.pickWithRay(this.groundBackRc, this.isGround);
         const baseHit = this.scene.pickWithRay(this.baseRc, this.isGround);
+
+        if (!groundFrontHit || !groundBackHit || !baseHit) {
+            throw new Error("[checkGrounded] Some raycast hit werent defined");
+        }
 
         /**
          * TODO: Isso aqui precisa verificar se o objeto
@@ -189,26 +157,14 @@ export class Physics {
          * quando falamos de pulo com movimentação. No futuro precisa verificar se o player está
          * no chao pra aplciar a questao da rampa que fixa o Y dele
          */
-        if (groundFrontHit || groundBackHit || baseHit) {
-            if (this.isOnGround(groundFrontHit, groundBackHit, baseHit)) {
-                this.isGrounded = true;
+        if (this.isOnGround(groundFrontHit, groundBackHit, baseHit)) {
+            this.isGrounded = true;
 
-                if (
-                    this.isClippedOnGround(
-                        groundFrontHit,
-                        groundBackHit,
-                        baseHit
-                    )
-                ) {
-                    this.snapToGroundSurface(
-                        groundFrontHit,
-                        groundBackHit,
-                        baseHit
-                    );
-                }
-            } else {
-                this.isGrounded = false;
+            if (this.isClippedOnGround(groundFrontHit, groundBackHit, baseHit)) {
+                this.snapToGroundSurface(groundFrontHit, groundBackHit, baseHit);
             }
+        } else {
+            this.isGrounded = false;
         }
     };
 
@@ -220,10 +176,9 @@ export class Physics {
         let onGround = false;
 
         if (baseHit?.hit) {
-            const baseRcReachedGround =
-                this.groundedDistance.greaterThanOrEqualTo(
-                    baseHit.distance - this.threshold
-                );
+            const baseRcReachedGround = this.groundedDistance.greaterThanOrEqualTo(
+                baseHit.distance - this.threshold
+            );
 
             if (baseRcReachedGround) {
                 onGround = true;
@@ -232,14 +187,12 @@ export class Physics {
             const frontDistance = groundFrontHit ? groundFrontHit.distance : 0;
             const backDistance = groundBackHit ? groundBackHit.distance : 0;
 
-            const frontRcReachedGround =
-                this.groundedDistance.greaterThanOrEqualTo(
-                    frontDistance - this.threshold
-                );
-            const backRcReachedGround =
-                this.groundedDistance.greaterThanOrEqualTo(
-                    backDistance - this.threshold
-                );
+            const frontRcReachedGround = this.groundedDistance.greaterThanOrEqualTo(
+                frontDistance - this.threshold
+            );
+            const backRcReachedGround = this.groundedDistance.greaterThanOrEqualTo(
+                backDistance - this.threshold
+            );
 
             if (frontRcReachedGround || backRcReachedGround) {
                 onGround = true;
@@ -262,10 +215,8 @@ export class Physics {
             const frontDistance = groundFrontHit ? groundFrontHit.distance : 0;
             const backDistance = groundBackHit ? groundBackHit.distance : 0;
 
-            const frontRcReachedGround =
-                this.groundedDistance.greaterThan(frontDistance);
-            const backRcReachedGround =
-                this.groundedDistance.greaterThan(backDistance);
+            const frontRcReachedGround = this.groundedDistance.greaterThan(frontDistance);
+            const backRcReachedGround = this.groundedDistance.greaterThan(backDistance);
 
             if (frontRcReachedGround || backRcReachedGround) {
                 isClipped = true;
@@ -284,28 +235,16 @@ export class Physics {
 
         if (baseHit && baseHit.hit) {
             const distance = new Decimal(baseHit.distance);
-            const prefabPositionY = new Decimal(
-                this.prefab.mesh.base.position.y
-            );
-            playerPosition = prefabPositionY
-                .plus(this.groundedDistance.minus(distance))
-                .toNumber();
+            const prefabPositionY = new Decimal(this.prefab.mesh.base.position.y);
+            playerPosition = prefabPositionY.plus(this.groundedDistance.minus(distance)).toNumber();
         } else if (groundFrontHit && groundFrontHit.hit) {
             const distance = new Decimal(groundFrontHit.distance);
-            const prefabPositionY = new Decimal(
-                this.prefab.mesh.base.position.y
-            );
-            playerPosition = prefabPositionY
-                .plus(this.groundedDistance.minus(distance))
-                .toNumber();
+            const prefabPositionY = new Decimal(this.prefab.mesh.base.position.y);
+            playerPosition = prefabPositionY.plus(this.groundedDistance.minus(distance)).toNumber();
         } else if (groundBackHit && groundBackHit.hit) {
             const distance = new Decimal(groundBackHit.distance);
-            const prefabPositionY = new Decimal(
-                this.prefab.mesh.base.position.y
-            );
-            playerPosition = prefabPositionY
-                .plus(this.groundedDistance.minus(distance))
-                .toNumber();
+            const prefabPositionY = new Decimal(this.prefab.mesh.base.position.y);
+            playerPosition = prefabPositionY.plus(this.groundedDistance.minus(distance)).toNumber();
         }
 
         if (playerPosition) {
@@ -313,13 +252,27 @@ export class Physics {
         }
     };
 
+    /**
+     * TODO: preciso de uma formula pra gravidade, de uma forma que o player acelere caindo
+     */
     applyGravity = () => {
-        const gravity = new Decimal(0.3);
-        this.prefab.mesh.base.position.y = new Decimal(
-            this.prefab.mesh.base.position.y
-        )
-            .minus(gravity)
-            .toNumber();
+        // const gravity = new Decimal(0.3);
+        // this.prefab.mesh.base.position.y = new Decimal(this.prefab.mesh.base.position.y)
+        //     .minus(gravity)
+        //     .toNumber();
+
+        if (this.scene.deltaTime) {
+            const deltaTime = new Decimal(this.scene.deltaTime).div(1000);
+
+            // Atualizar a velocidade com base na aceleração da gravidade
+            this.fallSpeed = this.fallSpeed.plus(this.gravity);
+
+            // Atualizar a posição com base na velocidade
+            const positionChange = this.fallSpeed.times(deltaTime);
+            this.prefab.mesh.base.position.y = new Decimal(this.prefab.mesh.base.position.y)
+                .minus(positionChange)
+                .toNumber();
+        }
     };
 
     moveRight = () => {
@@ -363,25 +316,21 @@ export class Physics {
     };
 
     findPoint = (point: Vector3) => {
-        const prefabNextPoint = new Vector3(
-            point.x,
-            this.prefab.mesh.base.position.y,
-            point.z
-        );
+        const prefabNextPoint = new Vector3(point.x, this.prefab.mesh.base.position.y, point.z);
 
-        const slopeRay = new Ray(prefabNextPoint, Vector3.Down(), 20);
-        const hit = this.scene.pickWithRay(slopeRay, this.isGround);
+        if (this.isGrounded) {
+            const slopeRay = new Ray(prefabNextPoint, Vector3.Down(), 20);
+            const hit = this.scene.pickWithRay(slopeRay, this.isGround);
 
-        if (hit && hit.distance) {
-            const distance = new Decimal(hit.distance);
-            const slopeDistance = distance.minus(this.groundedDistance);
+            if (hit && hit.distance) {
+                const distance = new Decimal(hit.distance);
+                const slopeDistance = distance.minus(this.groundedDistance);
 
-            if (!slopeDistance.equals(0)) {
-                const prefabNextPointY = new Decimal(prefabNextPoint.y);
-                prefabNextPoint.y = prefabNextPointY
-                    .minus(slopeDistance)
-                    .toNumber();
-                return prefabNextPoint;
+                if (!slopeDistance.equals(0)) {
+                    const prefabNextPointY = new Decimal(prefabNextPoint.y);
+                    prefabNextPoint.y = prefabNextPointY.minus(slopeDistance).toNumber();
+                    return prefabNextPoint;
+                }
             }
         }
 
