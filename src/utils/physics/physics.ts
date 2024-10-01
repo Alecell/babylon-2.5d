@@ -9,11 +9,11 @@ import { createRay, getPosition } from "./raycast";
 /**
  * TODO O jogador não deve poder subir qualquer rampa, a pesar de que provavelmente no jogo não haverá nenhum caminho bloqueado... Será?
  *
- * TODO: Fazer o player pulas
- *
  * TODO: os raycasts laterais precisam sempre apontar para a direção do chao seja pra frente ou pra tras
  *
  * TODO: As movimentação
+ *
+ * TODO: Fator de "deslisamento" do player, quando ele se move pra frente ou pra tras (fator que muda de acordo com o tipo de chão. Quem determina o fator é uma variavel no player e uma no chao), ele não deve se mover em linha reta, ele deve se mover em uma curva
  */
 
 export class Physics {
@@ -35,7 +35,7 @@ export class Physics {
     groundBackRcPosition: Positions = "left";
 
     gravity: Decimal = new Decimal(1);
-    fallSpeed = new Decimal(0);
+    verticalSpeed = new Decimal(0);
 
     constructor(
         private readonly prefab: Prefab,
@@ -111,16 +111,16 @@ export class Physics {
     };
 
     applyPhysics = () => {
-        this.updateRaysPosition();
-        this.checkGrounded();
-
         if (!this.isGrounded) {
             this.applyGravity();
         }
 
         if (this.isGrounded) {
-            this.fallSpeed = new Decimal(0);
+            this.verticalSpeed = new Decimal(0);
         }
+
+        this.updateRaysPosition();
+        this.checkGrounded();
     };
 
     updateRaysPosition = () => {
@@ -159,12 +159,13 @@ export class Physics {
          */
         if (this.isOnGround(groundFrontHit, groundBackHit, baseHit)) {
             this.isGrounded = true;
-
-            if (this.isClippedOnGround(groundFrontHit, groundBackHit, baseHit)) {
-                this.snapToGroundSurface(groundFrontHit, groundBackHit, baseHit);
-            }
         } else {
             this.isGrounded = false;
+        }
+
+        if (this.willClipOnGround(groundFrontHit, groundBackHit, baseHit)) {
+            this.isGrounded = true;
+            this.snapToGroundSurface(groundFrontHit, groundBackHit, baseHit);
         }
     };
 
@@ -202,28 +203,32 @@ export class Physics {
         return onGround;
     };
 
-    isClippedOnGround = (
+    willClipOnGround = (
         groundFrontHit: Nullable<PickingInfo>,
         groundBackHit: Nullable<PickingInfo>,
         baseHit: Nullable<PickingInfo>
     ) => {
-        let isClipped = false;
+        let willClip = false;
 
-        if (baseHit) {
-            isClipped = this.groundedDistance.greaterThan(baseHit.distance);
-        } else if (groundFrontHit || groundBackHit) {
-            const frontDistance = groundFrontHit ? groundFrontHit.distance : 0;
-            const backDistance = groundBackHit ? groundBackHit.distance : 0;
+        if (this.scene.deltaTime && !this.verticalSpeed.isZero()) {
+            const positionChange = this.verticalSpeed.times(new Decimal(this.scene.deltaTime).div(1000));
+            const feetPosition = this.groundedDistance.minus(this.prefab.mesh.base.position.y).neg();
+            const nextFeetPosition = feetPosition.minus(positionChange);
 
-            const frontRcReachedGround = this.groundedDistance.greaterThan(frontDistance);
-            const backRcReachedGround = this.groundedDistance.greaterThan(backDistance);
+            if (baseHit && baseHit.pickedPoint) {
+                willClip = new Decimal(baseHit.pickedPoint.y).greaterThan(nextFeetPosition);
+            } else {
+                if (groundFrontHit && groundFrontHit.pickedPoint) {
+                    willClip = new Decimal(groundFrontHit.pickedPoint.y).greaterThan(nextFeetPosition);
+                }
 
-            if (frontRcReachedGround || backRcReachedGround) {
-                isClipped = true;
+                if (groundBackHit && groundBackHit.pickedPoint) {
+                    willClip = new Decimal(groundBackHit.pickedPoint.y).greaterThan(nextFeetPosition);
+                }
             }
         }
 
-        return isClipped;
+        return willClip;
     };
 
     snapToGroundSurface = (
@@ -256,22 +261,24 @@ export class Physics {
      * TODO: preciso de uma formula pra gravidade, de uma forma que o player acelere caindo
      */
     applyGravity = () => {
-        // const gravity = new Decimal(0.3);
-        // this.prefab.mesh.base.position.y = new Decimal(this.prefab.mesh.base.position.y)
-        //     .minus(gravity)
-        //     .toNumber();
-
         if (this.scene.deltaTime) {
             const deltaTime = new Decimal(this.scene.deltaTime).div(1000);
 
             // Atualizar a velocidade com base na aceleração da gravidade
-            this.fallSpeed = this.fallSpeed.plus(this.gravity);
+            this.verticalSpeed = this.verticalSpeed.plus(this.gravity);
 
             // Atualizar a posição com base na velocidade
-            const positionChange = this.fallSpeed.times(deltaTime);
+            const positionChange = this.verticalSpeed.times(deltaTime);
             this.prefab.mesh.base.position.y = new Decimal(this.prefab.mesh.base.position.y)
                 .minus(positionChange)
                 .toNumber();
+        }
+    };
+
+    jump = () => {
+        if (this.isGrounded) {
+            this.verticalSpeed = new Decimal(-25);
+            this.isGrounded = false;
         }
     };
 
