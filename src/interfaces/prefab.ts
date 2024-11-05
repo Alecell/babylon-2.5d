@@ -1,14 +1,8 @@
-import {
-    Mesh,
-    Nullable,
-    Scene,
-    Skeleton,
-    Sound,
-    Texture,
-} from "@babylonjs/core";
+import { Mesh, Nullable, Scene, Skeleton, Sound, Texture } from "@babylonjs/core";
 
 import { GenericObject } from "../types/object";
 import { Physics } from "../utils/physics/physics";
+import Decimal from "decimal.js";
 
 export interface MeshGroup {
     base: Mesh;
@@ -16,7 +10,7 @@ export interface MeshGroup {
 }
 
 interface CharacterProperties {
-    speed: number;
+    speed: Decimal;
 }
 
 export abstract class Prefab {
@@ -43,5 +37,14 @@ export abstract class Prefab {
 
     get mesh() {
         return this._mesh;
+    }
+
+    set mesh(mesh: MeshGroup) {
+        this._mesh = mesh;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- workarround pra evitar o problema de tipagem do d.ts
+    set metadata(metadata: any) {
+        this._mesh.base.metadata = metadata;
     }
 }

@@ -2,40 +2,46 @@ import { AbstractMesh, Nullable, PickingInfo, Ray, RayHelper, Scene, Vector3 } f
 import Decimal from "decimal.js";
 
 import { Prefab } from "../../interfaces/prefab";
-import { Positions } from "./physics.types";
+import { Events, Positions } from "./physics.types";
 import { gameStore } from "../../store/game";
 import { createRay, getPosition } from "./raycast";
+import { GameObjectTypes } from "../../types/enum";
 
 /**
  * TODO O jogador não deve poder subir qualquer rampa, a pesar de que provavelmente no jogo não haverá nenhum caminho bloqueado... Será?
  *
  * TODO: os raycasts laterais precisam sempre apontar para a direção do chao seja pra frente ou pra tras
  *
- * TODO: As movimentação
- *
  * TODO: Fator de "deslisamento" do player, quando ele se move pra frente ou pra tras (fator que muda de acordo com o tipo de chão. Quem determina o fator é uma variavel no player e uma no chao), ele não deve se mover em linha reta, ele deve se mover em uma curva
+ *
+ * TODO: Trocar todos os numbers para Decimal
  */
 
 export class Physics {
-    isGrounded = false;
-    mapPoint = 0;
-    groundedDistance!: Decimal;
-    threshold = 0.001;
+    private _mapPoint = 0;
+    private _events: Partial<Events> = {};
 
-    baseRc!: Ray;
-    frontRc!: Ray;
-    backRc!: Ray;
-    groundFrontRc!: Ray;
-    groundBackRc!: Ray;
+    private _baseRc!: Ray;
+    private _frontRc!: Ray;
+    private _backRc!: Ray;
+    private _groundFrontRc!: Ray;
+    private _groundBackRc!: Ray;
 
-    baseRcPosition: Positions = "center";
-    frontRcPosition: Positions = "right";
-    backRcPosition: Positions = "left";
-    groundFrontRcPosition: Positions = "right";
-    groundBackRcPosition: Positions = "left";
+    private _baseRcPosition: Positions = "center";
+    private _frontRcPosition: Positions = "right";
+    private _backRcPosition: Positions = "left";
+    private _groundFrontRcPosition: Positions = "right";
+    private _groundBackRcPosition: Positions = "left";
 
-    gravity: Decimal = new Decimal(1);
-    verticalSpeed = new Decimal(0);
+    private _isGrounded = false;
+    private _groundedDistance!: Decimal;
+    private _threshold = 0.001;
+    private _gravity = new Decimal(1);
+    private _verticalSpeed = new Decimal(0);
+
+    private _slideCoefficient = new Decimal(0);
+    private _slide = false;
+    private _slideSpeed = new Decimal(0);
 
     constructor(
         private readonly prefab: Prefab,
@@ -43,6 +49,20 @@ export class Physics {
     ) {
         scene.onBeforeRenderObservable.add(this.preparePhysics);
         scene.onBeforeRenderObservable.add(this.applyPhysics);
+    }
+
+    get slideCoefficient(): number {
+        return this._slideCoefficient.toNumber();
+    }
+
+    set slideCoefficient(value: number) {
+        const decimalValue = new Decimal(value);
+
+        if (decimalValue.lessThan(0) || decimalValue.greaterThan(1)) {
+            throw new Error("slideCoefficient must be between 0 and 1");
+        }
+
+        this._slideCoefficient = decimalValue;
     }
 
     /**
@@ -58,28 +78,28 @@ export class Physics {
         const { extendSizeWorld } = mesh.getBoundingInfo().boundingBox;
 
         mesh.position = gameStore.map.start;
-        this.mapPoint = this.getInitialMapPoint();
-        this.groundedDistance = new Decimal(extendSizeWorld.y);
+        this._mapPoint = this.getInitialMapPoint();
+        this._groundedDistance = new Decimal(extendSizeWorld.y);
 
-        this.baseRc = createRay(this.baseRcPosition, Vector3.Down(), mesh);
-        this.frontRc = createRay(this.frontRcPosition, Vector3.Right(), mesh);
-        this.backRc = createRay(this.backRcPosition, Vector3.Left(), mesh);
-        this.groundBackRc = createRay(this.groundBackRcPosition, Vector3.Down(), mesh);
-        this.groundFrontRc = createRay(this.groundFrontRcPosition, Vector3.Down(), mesh);
+        this._baseRc = createRay(this._baseRcPosition, Vector3.Down(), mesh);
+        this._frontRc = createRay(this._frontRcPosition, Vector3.Right(), mesh);
+        this._backRc = createRay(this._backRcPosition, Vector3.Left(), mesh);
+        this._groundBackRc = createRay(this._groundBackRcPosition, Vector3.Down(), mesh);
+        this._groundFrontRc = createRay(this._groundFrontRcPosition, Vector3.Down(), mesh);
 
-        const frontRayHelper = new RayHelper(this.frontRc);
+        const frontRayHelper = new RayHelper(this._frontRc);
         frontRayHelper.show(this.scene);
 
-        const backRayHelper = new RayHelper(this.backRc);
+        const backRayHelper = new RayHelper(this._backRc);
         backRayHelper.show(this.scene);
 
-        const groundBackRayHelper = new RayHelper(this.groundBackRc);
+        const groundBackRayHelper = new RayHelper(this._groundBackRc);
         groundBackRayHelper.show(this.scene);
 
-        const groundFrontRayHelper = new RayHelper(this.groundFrontRc);
+        const groundFrontRayHelper = new RayHelper(this._groundFrontRc);
         groundFrontRayHelper.show(this.scene);
 
-        const baseRayHelper = new RayHelper(this.baseRc);
+        const baseRayHelper = new RayHelper(this._baseRc);
         baseRayHelper.show(this.scene);
 
         this.scene.onBeforeRenderObservable.removeCallback(this.preparePhysics);
@@ -111,61 +131,48 @@ export class Physics {
     };
 
     applyPhysics = () => {
-        if (!this.isGrounded) {
-            this.applyGravity();
-        }
+        const prevGrounded = this._isGrounded;
 
-        if (this.isGrounded) {
-            this.verticalSpeed = new Decimal(0);
+        if (!this._isGrounded || !this._verticalSpeed.isZero()) {
+            this.applyGravity();
         }
 
         this.updateRaysPosition();
         this.checkGrounded();
+        this.slide();
+        this.justLanded(prevGrounded);
     };
 
     updateRaysPosition = () => {
         const mesh = this.prefab.mesh.base;
 
-        this.baseRc.origin = getPosition(this.baseRcPosition, mesh);
-        this.frontRc.origin = getPosition(this.frontRcPosition, mesh);
-        this.backRc.origin = getPosition(this.backRcPosition, mesh);
-        this.groundFrontRc.origin = getPosition(this.groundFrontRcPosition, mesh);
-        this.groundBackRc.origin = getPosition(this.groundBackRcPosition, mesh);
+        this._baseRc.origin = getPosition(this._baseRcPosition, mesh);
+        this._frontRc.origin = getPosition(this._frontRcPosition, mesh);
+        this._backRc.origin = getPosition(this._backRcPosition, mesh);
+        this._groundFrontRc.origin = getPosition(this._groundFrontRcPosition, mesh);
+        this._groundBackRc.origin = getPosition(this._groundBackRcPosition, mesh);
     };
 
     checkGrounded = () => {
-        const groundFrontHit = this.scene.pickWithRay(this.groundFrontRc, this.isGround);
-        const groundBackHit = this.scene.pickWithRay(this.groundBackRc, this.isGround);
-        const baseHit = this.scene.pickWithRay(this.baseRc, this.isGround);
+        const groundFrontHitGround = this.scene.pickWithRay(this._groundFrontRc, this.isGround);
+        const groundBackHitGround = this.scene.pickWithRay(this._groundBackRc, this.isGround);
+        const baseHitGround = this.scene.pickWithRay(this._baseRc, this.isGround);
 
-        if (!groundFrontHit || !groundBackHit || !baseHit) {
+        if (!groundFrontHitGround || !groundBackHitGround || !baseHitGround) {
             throw new Error("[checkGrounded] Some raycast hit werent defined");
         }
 
         /**
-         * TODO: Isso aqui precisa verificar se o objeto
-         * é de uma certa tag, tipo ou coisa assim
-         * Não é qualquer objeto que é chão, pode ser agua
-         * As vezes um inimigo, ou um objeto que não é chão
          *
          * TODO: Na mesma linha do nem tudo é chao, tambem precisamos ter uma tag
          * para paredes, oq é e oq nao é parede, caso o contrario o player vai escalar a parede e fodase
          *
-         * TODO: No futuro não podemos verificar o basehit e o groundFontHit e groundBackHit no mesmo lugar
-         *
-         * TODO: O modo de fazer o player ficar atachado a curva da rampa pode causar problemas
-         * quando falamos de pulo com movimentação. No futuro precisa verificar se o player está
-         * no chao pra aplciar a questao da rampa que fixa o Y dele
          */
-        if (this.isOnGround(groundFrontHit, groundBackHit, baseHit)) {
-            this.isGrounded = true;
-        } else {
-            this.isGrounded = false;
-        }
+        this._isGrounded = this.isOnGround(groundFrontHitGround, groundBackHitGround, baseHitGround);
 
-        if (this.willClipOnGround(groundFrontHit, groundBackHit, baseHit)) {
-            this.isGrounded = true;
-            this.snapToGroundSurface(groundFrontHit, groundBackHit, baseHit);
+        if (this.willClipOnGround(groundFrontHitGround, groundBackHitGround, baseHitGround)) {
+            this._isGrounded = true;
+            this.snapToGroundSurface(groundFrontHitGround, groundBackHitGround, baseHitGround);
         }
     };
 
@@ -176,26 +183,22 @@ export class Physics {
     ) => {
         let onGround = false;
 
-        if (baseHit?.hit) {
-            const baseRcReachedGround = this.groundedDistance.greaterThanOrEqualTo(
-                baseHit.distance - this.threshold
+        if (groundFrontHit?.hit || groundBackHit?.hit || baseHit?.hit) {
+            const baseDistance = baseHit?.hit ? baseHit.distance : 0;
+            const frontDistance = groundFrontHit?.hit ? groundFrontHit.distance : 0;
+            const backDistance = groundBackHit?.hit ? groundBackHit.distance : 0;
+
+            const baseRcReachedGround = this._groundedDistance.greaterThanOrEqualTo(
+                baseDistance - this._threshold
+            );
+            const frontRcReachedGround = this._groundedDistance.greaterThanOrEqualTo(
+                frontDistance - this._threshold
+            );
+            const backRcReachedGround = this._groundedDistance.greaterThanOrEqualTo(
+                backDistance - this._threshold
             );
 
-            if (baseRcReachedGround) {
-                onGround = true;
-            }
-        } else if (groundFrontHit?.hit || groundBackHit?.hit) {
-            const frontDistance = groundFrontHit ? groundFrontHit.distance : 0;
-            const backDistance = groundBackHit ? groundBackHit.distance : 0;
-
-            const frontRcReachedGround = this.groundedDistance.greaterThanOrEqualTo(
-                frontDistance - this.threshold
-            );
-            const backRcReachedGround = this.groundedDistance.greaterThanOrEqualTo(
-                backDistance - this.threshold
-            );
-
-            if (frontRcReachedGround || backRcReachedGround) {
+            if (baseRcReachedGround || frontRcReachedGround || backRcReachedGround) {
                 onGround = true;
             }
         }
@@ -210,9 +213,11 @@ export class Physics {
     ) => {
         let willClip = false;
 
-        if (this.scene.deltaTime && !this.verticalSpeed.isZero()) {
-            const positionChange = this.verticalSpeed.times(new Decimal(this.scene.deltaTime).div(1000));
-            const feetPosition = this.groundedDistance.minus(this.prefab.mesh.base.position.y).neg();
+        if (this.scene.deltaTime && !this._verticalSpeed.isZero()) {
+            const positionChange = this._verticalSpeed.times(
+                new Decimal(this.scene.deltaTime).div(1000)
+            );
+            const feetPosition = this._groundedDistance.minus(this.prefab.mesh.base.position.y).neg();
             const nextFeetPosition = feetPosition.minus(positionChange);
 
             if (baseHit && baseHit.pickedPoint) {
@@ -241,15 +246,15 @@ export class Physics {
         if (baseHit && baseHit.hit) {
             const distance = new Decimal(baseHit.distance);
             const prefabPositionY = new Decimal(this.prefab.mesh.base.position.y);
-            playerPosition = prefabPositionY.plus(this.groundedDistance.minus(distance)).toNumber();
+            playerPosition = prefabPositionY.plus(this._groundedDistance.minus(distance)).toNumber();
         } else if (groundFrontHit && groundFrontHit.hit) {
             const distance = new Decimal(groundFrontHit.distance);
             const prefabPositionY = new Decimal(this.prefab.mesh.base.position.y);
-            playerPosition = prefabPositionY.plus(this.groundedDistance.minus(distance)).toNumber();
+            playerPosition = prefabPositionY.plus(this._groundedDistance.minus(distance)).toNumber();
         } else if (groundBackHit && groundBackHit.hit) {
             const distance = new Decimal(groundBackHit.distance);
             const prefabPositionY = new Decimal(this.prefab.mesh.base.position.y);
-            playerPosition = prefabPositionY.plus(this.groundedDistance.minus(distance)).toNumber();
+            playerPosition = prefabPositionY.plus(this._groundedDistance.minus(distance)).toNumber();
         }
 
         if (playerPosition) {
@@ -257,42 +262,97 @@ export class Physics {
         }
     };
 
-    /**
-     * TODO: preciso de uma formula pra gravidade, de uma forma que o player acelere caindo
-     */
+    justLanded = (prevGrounded: boolean) => {
+        if (this._isGrounded && !prevGrounded) {
+            this._verticalSpeed = new Decimal(0);
+            this._events["hit-ground"]?.(this._verticalSpeed);
+        }
+    };
+
     applyGravity = () => {
         if (this.scene.deltaTime) {
             const deltaTime = new Decimal(this.scene.deltaTime).div(1000);
 
-            // Atualizar a velocidade com base na aceleração da gravidade
-            this.verticalSpeed = this.verticalSpeed.plus(this.gravity);
+            this._verticalSpeed = this._verticalSpeed.plus(this._gravity);
 
-            // Atualizar a posição com base na velocidade
-            const positionChange = this.verticalSpeed.times(deltaTime);
+            const positionChange = this._verticalSpeed.times(deltaTime);
             this.prefab.mesh.base.position.y = new Decimal(this.prefab.mesh.base.position.y)
                 .minus(positionChange)
                 .toNumber();
         }
     };
 
+    shouldSlide = (slide = true) => {
+        this._slide = slide;
+    };
+
+    /**
+     * TODO: O slide nao deve ser cancelado quando o player apertar
+     * para outro lado, ele deve ser como uma força cancelada aos
+     * poucos para que seja algo mais consistente em fazes de gelo
+     * e coisas assim.
+     *
+     * Devo ter o coeficiente de slide base de um objeto e
+     * o chão determina o quanto ele vai slidar na superficie
+     * baseado no chao, entao o coeficiente de slide é do
+     * objeto, mas o quanto ele vai deslizar é do chao.
+     *
+     * O coeficiente base é relativo ao equipamento do player
+     * talvez uma bota de gelo pra nao escorregar, talvez
+     * descalço, isso interage diretamente com o chão então
+     * a interação entre o player e o chão é o coeficiente
+     * final que determina de fato o quanto na superficie
+     * o player irá deslizar.
+     *
+     * Talvez a mecanica de força que eu to pensando se aplica nesse "slide speed", talvez só mudar
+     * o nome e fazer isso se aplicar melhor pra outras direçòes seja a call correta
+     * pq no fim o sliding é justamente isso, eu me movimentei, isso gerou uma força
+     * e essa força remanescente é o que faz o player deslizar.
+     *
+     * Lembrando que decorrente dessa função de slide ainda to com o bug de quando eu tento
+     * me mover rapidamente e ele acaba parando do nada em alguns momentos. Isso precisa ser
+     * resolvido, mas nào sei bem oq devo resolver primeiro, a questào da força
+     * ou o bug do slide quando aperta os botòes igual um doente.
+     *
+     * Lembrando que provavelmente a primeira coisa a se fazer é tirar o trigger do slide
+     * do evento de keyup e colocar direto dentro do physics baseado em um movimento que
+     * não ta mais em execussão
+     */
+    private slide = () => {
+        if (!this._slideSpeed.isZero() && this._slide) {
+            this._mapPoint = this._mapPoint + this._slideSpeed.toNumber();
+            this.moveTo(this._mapPoint);
+
+            this._slideSpeed = this._slideSpeed.times(this.slideCoefficient);
+
+            if (this._slideSpeed.abs().lessThan(0.01)) {
+                this._slideSpeed = new Decimal(0);
+                this._slide = false;
+            }
+        }
+    };
+
     jump = () => {
-        if (this.isGrounded) {
-            this.verticalSpeed = new Decimal(-25);
-            this.isGrounded = false;
+        if (this._isGrounded) {
+            this._verticalSpeed = new Decimal(-25);
         }
     };
 
     moveRight = () => {
-        if (this.prefab.properties) {
-            this.mapPoint += this.prefab.properties.speed;
-            this.moveTo(this.mapPoint);
+        if (this.prefab.properties?.speed) {
+            this.shouldSlide(false);
+            this._mapPoint += this.prefab.properties.speed.toNumber();
+            this._slideSpeed = this.prefab.properties.speed;
+            this.moveTo(this._mapPoint);
         }
     };
 
     moveLeft = () => {
-        if (this.prefab.properties) {
-            this.mapPoint -= this.prefab.properties.speed;
-            this.moveTo(this.mapPoint);
+        if (this.prefab.properties?.speed) {
+            this.shouldSlide(false);
+            this._mapPoint -= this.prefab.properties.speed.toNumber();
+            this._slideSpeed = this.prefab.properties.speed.neg();
+            this.moveTo(this._mapPoint);
         }
     };
 
@@ -325,13 +385,13 @@ export class Physics {
     findPoint = (point: Vector3) => {
         const prefabNextPoint = new Vector3(point.x, this.prefab.mesh.base.position.y, point.z);
 
-        if (this.isGrounded) {
+        if (this._isGrounded) {
             const slopeRay = new Ray(prefabNextPoint, Vector3.Down(), 20);
             const hit = this.scene.pickWithRay(slopeRay, this.isGround);
 
             if (hit && hit.distance) {
                 const distance = new Decimal(hit.distance);
-                const slopeDistance = distance.minus(this.groundedDistance);
+                const slopeDistance = distance.minus(this._groundedDistance);
 
                 if (!slopeDistance.equals(0)) {
                     const prefabNextPointY = new Decimal(prefabNextPoint.y);
@@ -344,12 +404,8 @@ export class Physics {
         return prefabNextPoint;
     };
 
-    /**
-     * TODO: O modo de verificação do chao baseado no `name` é muito ruim
-     * preciso colocar algo baseado em Tags ou Metadata
-     */
     isGround = (mesh: AbstractMesh) => {
-        if (mesh.name === "Plane") return true;
+        if (mesh.metadata?.type === GameObjectTypes.GROUND) return true;
         return false;
     };
 
@@ -359,5 +415,9 @@ export class Physics {
             accumulatedLength += Vector3.Distance(points[i], points[i + 1]);
         }
         return accumulatedLength;
+    };
+
+    addEventListener = (event: keyof Events, cb: Events[keyof Events]) => {
+        this._events[event] = cb;
     };
 }
