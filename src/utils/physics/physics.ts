@@ -1,4 +1,13 @@
-import { AbstractMesh, Nullable, PickingInfo, Ray, RayHelper, Scene, Vector3 } from "@babylonjs/core";
+import {
+    AbstractMesh,
+    Nullable,
+    PickingInfo,
+    Ray,
+    RayHelper,
+    Scene,
+    Vector2,
+    Vector3,
+} from "@babylonjs/core";
 import Decimal from "decimal.js";
 
 import { Prefab } from "../../interfaces/prefab";
@@ -6,6 +15,92 @@ import { Events, Positions } from "./physics.types";
 import { gameStore } from "../../store/game";
 import { createRay, getPosition } from "./raycast";
 import { GameObjectTypes } from "../../types/enum";
+
+// Classe Force que representa uma força com direção, magnitude, taxa de decaimento e chave
+class Force {
+    direction: Vector2;
+    magnitude: Decimal;
+    key: string;
+
+    constructor(direction: Vector2, magnitude: Decimal, key?: string) {
+        this.direction = direction.normalize();
+        this.magnitude = magnitude;
+        this.key = key || this.generateKey();
+    }
+
+    scale(): Vector2 {
+        return this.direction.scale(this.magnitude.toNumber());
+    }
+
+    isZero(): boolean {
+        return this.magnitude.lessThan(0.01);
+    }
+
+    private generateKey(): string {
+        return Math.random().toString(36).substr(2, 9);
+    }
+}
+
+// Classe ForceManager que gerencia um objeto de forças e converte a força resultante em velocidade
+/**
+ * TODO: Não faz sentido nesse jogo um Vector3, devemos usar apenas Vector2 quando falarmos
+ * de movimento, assim não precisamos gerar duvida, o movimento em X é sobre movimentação Horizontal
+ * e o movimento em Y é movimentaçào vertical.
+ *
+ * A força não tem mais decaimento pois o que irá decair a força são outras forças
+ * de resistencia como atrito que depende do solo ou a gravidade que puxa o player
+ * para baixo.
+ *
+ * Com isso o slide ainda depende do coeficiente de atrito do solo em questão, as coisas vão
+ * poder ser aplicadas gradualmente.
+ *
+ */
+class ForceManager {
+    private forces: { [key: string]: Force } = {};
+
+    addForce({
+        direction,
+        magnitude,
+        decayRate = new Decimal(0.8),
+        key,
+    }: {
+        direction: Vector2;
+        magnitude: Decimal;
+        decayRate?: Decimal;
+        key?: string;
+    }): string {
+        if (decayRate.lessThan(0) || decayRate.greaterThan(1)) {
+            throw new Error("decayRate must be between 0 and 1");
+        }
+
+        const force = new Force(direction, magnitude, key);
+        this.forces[force.key] = force;
+        return force.key;
+    }
+
+    applyForces(): { horizontalVelocity: Decimal; verticalVelocity: Decimal } {
+        let totalForce = new Vector2(0, 0);
+
+        this.forces = Object.fromEntries(
+            Object.entries(this.forces).filter(([, force]) => {
+                if (!force.isZero()) {
+                    totalForce = totalForce.add(force.scale());
+                    return true;
+                }
+                return false;
+            })
+        );
+
+        const horizontalVelocity = new Decimal(totalForce.x);
+        const verticalVelocity = new Decimal(totalForce.y);
+
+        return { horizontalVelocity, verticalVelocity };
+    }
+
+    removeForce(key: string) {
+        delete this.forces[key];
+    }
+}
 
 /**
  * TODO O jogador não deve poder subir qualquer rampa, a pesar de que provavelmente no jogo não haverá nenhum caminho bloqueado... Será?
@@ -42,6 +137,7 @@ export class Physics {
     private _slideCoefficient = new Decimal(0);
     private _slide = false;
     private _slideSpeed = new Decimal(0);
+    private forceManager = new ForceManager();
 
     constructor(
         private readonly prefab: Prefab,
@@ -136,6 +232,9 @@ export class Physics {
         if (!this._isGrounded || !this._verticalSpeed.isZero()) {
             this.applyGravity();
         }
+
+        const forces = this.forceManager.applyForces();
+        console.log(forces);
 
         this.updateRaysPosition();
         this.checkGrounded();
@@ -273,7 +372,7 @@ export class Physics {
         if (this.scene.deltaTime) {
             const deltaTime = new Decimal(this.scene.deltaTime).div(1000);
 
-            this._verticalSpeed = this._verticalSpeed.plus(this._gravity);
+            this._verticalSpeed = this._verticalSpeed.plus(this._gravity); // TODO: aplicar a gravidade como uma força de decaimento
 
             const positionChange = this._verticalSpeed.times(deltaTime);
             this.prefab.mesh.base.position.y = new Decimal(this.prefab.mesh.base.position.y)
@@ -332,27 +431,43 @@ export class Physics {
         }
     };
 
+    // TODO: criar função de "pulo no ar" pode ser a mesma ou outra, mas precisa disso com uma força vindo de outra variavel
     jump = () => {
         if (this._isGrounded) {
+            // TODO: essa força aqui tem q ser parametrizavel
             this._verticalSpeed = new Decimal(-25);
         }
     };
 
     moveRight = () => {
         if (this.prefab.properties?.speed) {
-            this.shouldSlide(false);
-            this._mapPoint += this.prefab.properties.speed.toNumber();
-            this._slideSpeed = this.prefab.properties.speed;
-            this.moveTo(this._mapPoint);
+            // this.shouldSlide(false);
+            // this._mapPoint += this.prefab.properties.speed.toNumber();
+            // this._slideSpeed = this.prefab.properties.speed;
+
+            this.forceManager.addForce({
+                key: "movement",
+                direction: new Vector2(1, 0),
+                magnitude: this.prefab.properties.speed,
+            });
+
+            // this.moveTo(this._mapPoint);
         }
     };
 
     moveLeft = () => {
         if (this.prefab.properties?.speed) {
-            this.shouldSlide(false);
-            this._mapPoint -= this.prefab.properties.speed.toNumber();
-            this._slideSpeed = this.prefab.properties.speed.neg();
-            this.moveTo(this._mapPoint);
+            // this.shouldSlide(false);
+            // this._mapPoint -= this.prefab.properties.speed.toNumber();
+            // this._slideSpeed = this.prefab.properties.speed.neg();
+
+            this.forceManager.addForce({
+                key: "movement",
+                direction: new Vector2(-1, 0),
+                magnitude: this.prefab.properties.speed,
+            });
+
+            // this.moveTo(this._mapPoint);
         }
     };
 
