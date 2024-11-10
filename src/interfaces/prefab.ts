@@ -3,14 +3,20 @@ import { Mesh, Nullable, Scene, Skeleton, Sound, Texture } from "@babylonjs/core
 import { GenericObject } from "../types/object";
 import { Physics } from "../utils/physics/physics";
 import Decimal from "decimal.js";
+import { Friction } from "../utils/physics/friction";
 
 export interface MeshGroup {
     base: Mesh;
     [key: string]: Mesh;
 }
 
+// TODO: prefab pra cada tipo de coisa diferente, criatura, chão, item e etc
 interface CharacterProperties {
-    speed: Decimal;
+    speed?: Decimal;
+    friction?: Nullable<{
+        horizontal?: Friction;
+        vertical?: Friction;
+    }>;
 }
 
 export abstract class Prefab {

@@ -16,6 +16,7 @@ import { Animation } from "./Animation";
 import player from "./player.glb";
 import { GameObjectTypes } from "../../types/enum";
 import Decimal from "decimal.js";
+import { Friction } from "../../utils/physics/friction";
 
 class Player extends Prefab {
     private _controls!: Controls;
@@ -24,20 +25,22 @@ class Player extends Prefab {
 
     properties = {
         speed: new Decimal(0.3),
+        friction: {
+            horizontal: new Friction(0.1, 0.1),
+        },
     };
 
     constructor(loaded: ISceneLoaderAsyncResult, scene: Scene) {
         super("Player", scene);
 
         this.mesh = this.initMeshes(loaded);
-        this.metadata = { type: GameObjectTypes.PLAYER };
+        this.metadata = { type: GameObjectTypes.PLAYER, friction: this.properties.friction };
         this._skeleton = loaded.skeletons[0];
 
         // this._camera = new Camera(this._mesh.base, this.scene);
-        // this._animation = new Animation(this._skeleton, this.scene);
+        // this._animation = new Animation(this._skeleton, this.scedne);
         this._controls = new Controls(this._mesh.base, this._animation, this._physics, this.scene);
-        this._physics.slideCoefficient = 0.9;
-        this._physics.addEventListener("hit-ground", this.oi);
+        this._physics.addEventListener("on-land", this.oi);
     }
 
     oi = () => {

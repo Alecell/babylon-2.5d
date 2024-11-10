@@ -2,14 +2,22 @@ import { ISceneLoaderAsyncResult, Mesh, Scene, SceneLoader } from "@babylonjs/co
 import { Prefab } from "../../interfaces/prefab";
 import fase from "./chao-2.babylon";
 import { GameObjectTypes } from "../../types/enum";
+import { Friction } from "../../utils/physics/friction";
 
 export class Ground extends Prefab {
-    properties = null;
+    properties = {
+        friction: {
+            horizontal: new Friction(0.1, 1),
+        },
+    };
 
     constructor(loaded: ISceneLoaderAsyncResult, scene: Scene) {
         super("Ground", scene, false);
         this.initMeshes(loaded);
-        this.metadata = { type: GameObjectTypes.GROUND };
+        this.metadata = {
+            type: GameObjectTypes.GROUND,
+            friction: this.properties.friction,
+        };
     }
 
     initMeshes(loaded: ISceneLoaderAsyncResult) {

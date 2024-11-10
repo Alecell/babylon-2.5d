@@ -11,12 +11,12 @@ import {
 import Decimal from "decimal.js";
 
 import { Prefab } from "../../interfaces/prefab";
-import { Events, Positions } from "./physics.types";
+import { Events, FrictionForce, Positions } from "./physics.types";
 import { gameStore } from "../../store/game";
 import { createRay, getPosition } from "./raycast";
 import { GameObjectTypes } from "../../types/enum";
+import { Friction } from "./friction";
 
-// Classe Force que representa uma força com direção, magnitude, taxa de decaimento e chave
 class Force {
     direction: Vector2;
     magnitude: Decimal;
@@ -28,8 +28,10 @@ class Force {
         this.key = key || this.generateKey();
     }
 
-    scale(): Vector2 {
-        return this.direction.scale(this.magnitude.toNumber());
+    scale(friction: number): Vector2 {
+        const force = this.direction.scale(this.magnitude.toNumber());
+        this.magnitude = this.magnitude.times(1 - friction);
+        return force;
     }
 
     isZero(): boolean {
@@ -41,50 +43,34 @@ class Force {
     }
 }
 
-// Classe ForceManager que gerencia um objeto de forças e converte a força resultante em velocidade
-/**
- * TODO: Não faz sentido nesse jogo um Vector3, devemos usar apenas Vector2 quando falarmos
- * de movimento, assim não precisamos gerar duvida, o movimento em X é sobre movimentação Horizontal
- * e o movimento em Y é movimentaçào vertical.
- *
- * A força não tem mais decaimento pois o que irá decair a força são outras forças
- * de resistencia como atrito que depende do solo ou a gravidade que puxa o player
- * para baixo.
- *
- * Com isso o slide ainda depende do coeficiente de atrito do solo em questão, as coisas vão
- * poder ser aplicadas gradualmente.
- *
- */
 class ForceManager {
     private forces: { [key: string]: Force } = {};
 
     addForce({
         direction,
         magnitude,
-        decayRate = new Decimal(0.8),
         key,
     }: {
         direction: Vector2;
         magnitude: Decimal;
-        decayRate?: Decimal;
         key?: string;
     }): string {
-        if (decayRate.lessThan(0) || decayRate.greaterThan(1)) {
-            throw new Error("decayRate must be between 0 and 1");
-        }
-
+        // TODO: O força pode ser apenas um vector2, a magnitude estaria imbutida no vetor sem precisar passa-la como um parametro extra
         const force = new Force(direction, magnitude, key);
         this.forces[force.key] = force;
         return force.key;
     }
 
-    applyForces(): { horizontalVelocity: Decimal; verticalVelocity: Decimal } {
+    applyForces(frictions: FrictionForce): {
+        horizontalVelocity: Decimal;
+        verticalVelocity: Decimal;
+    } {
         let totalForce = new Vector2(0, 0);
 
         this.forces = Object.fromEntries(
             Object.entries(this.forces).filter(([, force]) => {
                 if (!force.isZero()) {
-                    totalForce = totalForce.add(force.scale());
+                    totalForce = totalForce.add(force.scale(frictions.horizontal));
                     return true;
                 }
                 return false;
@@ -107,9 +93,10 @@ class ForceManager {
  *
  * TODO: os raycasts laterais precisam sempre apontar para a direção do chao seja pra frente ou pra tras
  *
- * TODO: Fator de "deslisamento" do player, quando ele se move pra frente ou pra tras (fator que muda de acordo com o tipo de chão. Quem determina o fator é uma variavel no player e uma no chao), ele não deve se mover em linha reta, ele deve se mover em uma curva
- *
  * TODO: Trocar todos os numbers para Decimal
+ *
+ * TODO: Faz sentido definir uma força limite para o jogador? Assim poderiamos ter algo como uma aceleração
+ * mas quem iria controlar isso? A fisica ou o controle? 🤔
  */
 
 export class Physics {
@@ -134,10 +121,7 @@ export class Physics {
     private _gravity = new Decimal(1);
     private _verticalSpeed = new Decimal(0);
 
-    private _slideCoefficient = new Decimal(0);
-    private _slide = false;
-    private _slideSpeed = new Decimal(0);
-    private forceManager = new ForceManager();
+    forceManager = new ForceManager();
 
     constructor(
         private readonly prefab: Prefab,
@@ -145,20 +129,6 @@ export class Physics {
     ) {
         scene.onBeforeRenderObservable.add(this.preparePhysics);
         scene.onBeforeRenderObservable.add(this.applyPhysics);
-    }
-
-    get slideCoefficient(): number {
-        return this._slideCoefficient.toNumber();
-    }
-
-    set slideCoefficient(value: number) {
-        const decimalValue = new Decimal(value);
-
-        if (decimalValue.lessThan(0) || decimalValue.greaterThan(1)) {
-            throw new Error("slideCoefficient must be between 0 and 1");
-        }
-
-        this._slideCoefficient = decimalValue;
     }
 
     /**
@@ -228,18 +198,51 @@ export class Physics {
 
     applyPhysics = () => {
         const prevGrounded = this._isGrounded;
+        const frictions = this.getFriction();
+        const velocities = this.forceManager.applyForces(frictions);
 
         if (!this._isGrounded || !this._verticalSpeed.isZero()) {
             this.applyGravity();
         }
 
-        const forces = this.forceManager.applyForces();
-        console.log(forces);
-
         this.updateRaysPosition();
         this.checkGrounded();
-        this.slide();
-        this.justLanded(prevGrounded);
+        this.handleLand(prevGrounded);
+        this.movement(velocities.horizontalVelocity);
+    };
+
+    getFriction = (): FrictionForce => {
+        const horizontal = this.getHorizontalFriction();
+
+        return {
+            horizontal,
+            vertical: 0,
+        };
+    };
+
+    getHorizontalFriction = () => {
+        let friction = 0;
+
+        if (this._isGrounded) {
+            const frictions = [];
+            const frontHit = this.scene.pickWithRay(this._frontRc, this.isGround);
+            const backHit = this.scene.pickWithRay(this._backRc, this.isGround);
+            const baseHit = this.scene.pickWithRay(this._baseRc, this.isGround);
+
+            frictions.push(this.prefab.properties?.friction?.horizontal);
+
+            if (baseHit?.hit) {
+                frictions.push(baseHit.pickedMesh?.metadata?.friction.horizontal);
+            } else if (frontHit?.hit) {
+                frictions.push(frontHit.pickedMesh?.metadata?.friction.horizontal);
+            } else if (backHit?.hit) {
+                frictions.push(backHit.pickedMesh?.metadata?.friction.horizontal);
+            }
+
+            friction = Friction.calculateNormalizedWeightedAverage(frictions);
+        }
+
+        return friction;
     };
 
     updateRaysPosition = () => {
@@ -253,11 +256,11 @@ export class Physics {
     };
 
     checkGrounded = () => {
-        const groundFrontHitGround = this.scene.pickWithRay(this._groundFrontRc, this.isGround);
-        const groundBackHitGround = this.scene.pickWithRay(this._groundBackRc, this.isGround);
-        const baseHitGround = this.scene.pickWithRay(this._baseRc, this.isGround);
+        const groundFrontHit = this.scene.pickWithRay(this._groundFrontRc, this.isGround);
+        const groundBackHit = this.scene.pickWithRay(this._groundBackRc, this.isGround);
+        const groundBaseHit = this.scene.pickWithRay(this._baseRc, this.isGround);
 
-        if (!groundFrontHitGround || !groundBackHitGround || !baseHitGround) {
+        if (!groundFrontHit || !groundBackHit || !groundBaseHit) {
             throw new Error("[checkGrounded] Some raycast hit werent defined");
         }
 
@@ -267,11 +270,11 @@ export class Physics {
          * para paredes, oq é e oq nao é parede, caso o contrario o player vai escalar a parede e fodase
          *
          */
-        this._isGrounded = this.isOnGround(groundFrontHitGround, groundBackHitGround, baseHitGround);
+        this._isGrounded = this.isOnGround(groundFrontHit, groundBackHit, groundBaseHit);
 
-        if (this.willClipOnGround(groundFrontHitGround, groundBackHitGround, baseHitGround)) {
+        if (this.willClipOnGround(groundFrontHit, groundBackHit, groundBaseHit)) {
             this._isGrounded = true;
-            this.snapToGroundSurface(groundFrontHitGround, groundBackHitGround, baseHitGround);
+            this.snapToGroundSurface(groundFrontHit, groundBackHit, groundBaseHit);
         }
     };
 
@@ -361,10 +364,10 @@ export class Physics {
         }
     };
 
-    justLanded = (prevGrounded: boolean) => {
+    handleLand = (prevGrounded: boolean) => {
         if (this._isGrounded && !prevGrounded) {
             this._verticalSpeed = new Decimal(0);
-            this._events["hit-ground"]?.(this._verticalSpeed);
+            this._events["on-land"]?.(this._verticalSpeed);
         }
     };
 
@@ -381,56 +384,6 @@ export class Physics {
         }
     };
 
-    shouldSlide = (slide = true) => {
-        this._slide = slide;
-    };
-
-    /**
-     * TODO: O slide nao deve ser cancelado quando o player apertar
-     * para outro lado, ele deve ser como uma força cancelada aos
-     * poucos para que seja algo mais consistente em fazes de gelo
-     * e coisas assim.
-     *
-     * Devo ter o coeficiente de slide base de um objeto e
-     * o chão determina o quanto ele vai slidar na superficie
-     * baseado no chao, entao o coeficiente de slide é do
-     * objeto, mas o quanto ele vai deslizar é do chao.
-     *
-     * O coeficiente base é relativo ao equipamento do player
-     * talvez uma bota de gelo pra nao escorregar, talvez
-     * descalço, isso interage diretamente com o chão então
-     * a interação entre o player e o chão é o coeficiente
-     * final que determina de fato o quanto na superficie
-     * o player irá deslizar.
-     *
-     * Talvez a mecanica de força que eu to pensando se aplica nesse "slide speed", talvez só mudar
-     * o nome e fazer isso se aplicar melhor pra outras direçòes seja a call correta
-     * pq no fim o sliding é justamente isso, eu me movimentei, isso gerou uma força
-     * e essa força remanescente é o que faz o player deslizar.
-     *
-     * Lembrando que decorrente dessa função de slide ainda to com o bug de quando eu tento
-     * me mover rapidamente e ele acaba parando do nada em alguns momentos. Isso precisa ser
-     * resolvido, mas nào sei bem oq devo resolver primeiro, a questào da força
-     * ou o bug do slide quando aperta os botòes igual um doente.
-     *
-     * Lembrando que provavelmente a primeira coisa a se fazer é tirar o trigger do slide
-     * do evento de keyup e colocar direto dentro do physics baseado em um movimento que
-     * não ta mais em execussão
-     */
-    private slide = () => {
-        if (!this._slideSpeed.isZero() && this._slide) {
-            this._mapPoint = this._mapPoint + this._slideSpeed.toNumber();
-            this.moveTo(this._mapPoint);
-
-            this._slideSpeed = this._slideSpeed.times(this.slideCoefficient);
-
-            if (this._slideSpeed.abs().lessThan(0.01)) {
-                this._slideSpeed = new Decimal(0);
-                this._slide = false;
-            }
-        }
-    };
-
     // TODO: criar função de "pulo no ar" pode ser a mesma ou outra, mas precisa disso com uma força vindo de outra variavel
     jump = () => {
         if (this._isGrounded) {
@@ -439,36 +392,30 @@ export class Physics {
         }
     };
 
+    // TODO: nao existe moveRight e moveLeft, existe um applyForce dado um botao apertado e isso que deve ser feito no lado do controller
     moveRight = () => {
         if (this.prefab.properties?.speed) {
-            // this.shouldSlide(false);
-            // this._mapPoint += this.prefab.properties.speed.toNumber();
-            // this._slideSpeed = this.prefab.properties.speed;
-
             this.forceManager.addForce({
                 key: "movement",
                 direction: new Vector2(1, 0),
                 magnitude: this.prefab.properties.speed,
             });
-
-            // this.moveTo(this._mapPoint);
         }
     };
 
     moveLeft = () => {
         if (this.prefab.properties?.speed) {
-            // this.shouldSlide(false);
-            // this._mapPoint -= this.prefab.properties.speed.toNumber();
-            // this._slideSpeed = this.prefab.properties.speed.neg();
-
             this.forceManager.addForce({
                 key: "movement",
                 direction: new Vector2(-1, 0),
                 magnitude: this.prefab.properties.speed,
             });
-
-            // this.moveTo(this._mapPoint);
         }
+    };
+
+    movement = (horizontalVelocity: Decimal) => {
+        this._mapPoint += horizontalVelocity.toNumber();
+        this.moveTo(this._mapPoint);
     };
 
     moveTo = (point: number) => {
@@ -519,10 +466,7 @@ export class Physics {
         return prefabNextPoint;
     };
 
-    isGround = (mesh: AbstractMesh) => {
-        if (mesh.metadata?.type === GameObjectTypes.GROUND) return true;
-        return false;
-    };
+    isGround = (mesh: AbstractMesh) => mesh.metadata?.type === GameObjectTypes.GROUND;
 
     calculateArcLength = (points: Vector3[], endIndex: number) => {
         let accumulatedLength = 0;
