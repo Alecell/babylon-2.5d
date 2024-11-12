@@ -3,6 +3,7 @@ import Decimal from "decimal.js";
 import { ForceComponents } from "./force.types";
 import { FrictionForce } from "./physics.types";
 
+// TODO: separar tudo que é tipo complexo daqui e colocar no foce.types.ts
 export class Force {
     direction: Vector2;
     magnitude: Decimal;
@@ -65,21 +66,25 @@ export class ForceManager {
         const totalForce = new Vector2(0, 0);
         const opposingForces = this.sumForcesByComponents();
 
-        this.forces = Object.fromEntries(
-            Object.entries(this.forces).filter(([, force]) => {
-                const hasMagnitude = !force.isZero();
+        const keys = Object.keys(this.forces);
+        const newForces: { [key: string]: Force } = {};
 
-                if (hasMagnitude) {
-                    const direction = this.getDirection(force);
-                    const opposingMagnitude = this.getOpposingMagnitude(force, opposingForces);
-                    totalForce.addInPlace(
-                        force.scale(new Decimal(frictions[direction]), opposingMagnitude)
-                    );
-                }
+        for (let i = 0; i < keys.length; i++) {
+            const key = keys[i];
+            const force = this.forces[key];
+            const hasMagnitude = !force.isZero();
 
-                return hasMagnitude;
-            })
-        );
+            if (hasMagnitude) {
+                const opposingMagnitude = this.getOpposingMagnitude(force, opposingForces);
+                const direction = this.getDirection(force);
+                const friction = new Decimal(frictions[direction]);
+
+                totalForce.addInPlace(force.scale(friction, opposingMagnitude));
+                newForces[key] = force;
+            }
+        }
+
+        this.forces = newForces;
 
         return {
             horizontalVelocity: new Decimal(totalForce.x),
