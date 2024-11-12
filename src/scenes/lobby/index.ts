@@ -18,10 +18,7 @@ export async function Lobby(engine: Engine, canvas: HTMLCanvasElement) {
     const scene = new Scene(engine);
 
     new HemisphericLight("light1", new Vector3(1, 1, 0), scene);
-    const [Player, Ground] = await meshLoader([
-        createPlayer(scene),
-        createGround(scene),
-    ]);
+    const [Player, Ground] = await meshLoader([createPlayer(scene), createGround(scene)]);
 
     const points = [
         new Vector3(-14.39, 0, -4.66),
@@ -36,11 +33,7 @@ export async function Lobby(engine: Engine, canvas: HTMLCanvasElement) {
     const catmullRom = Curve3.CreateCatmullRomSpline(points, 60);
 
     points.forEach((point) => {
-        const sphere = MeshBuilder.CreateSphere(
-            "point",
-            { diameter: 0.5 },
-            scene
-        );
+        const sphere = MeshBuilder.CreateSphere("point", { diameter: 0.5 }, scene);
         sphere.position = point;
     });
 

@@ -16,77 +16,7 @@ import { gameStore } from "../../store/game";
 import { createRay, getPosition } from "./raycast";
 import { GameObjectTypes } from "../../types/enum";
 import { Friction } from "./friction";
-
-class Force {
-    direction: Vector2;
-    magnitude: Decimal;
-    key: string;
-
-    constructor(direction: Vector2, magnitude: Decimal, key?: string) {
-        this.direction = direction.normalize();
-        this.magnitude = magnitude;
-        this.key = key || this.generateKey();
-    }
-
-    scale(friction: number): Vector2 {
-        const force = this.direction.scale(this.magnitude.toNumber());
-        this.magnitude = this.magnitude.times(1 - friction);
-        return force;
-    }
-
-    isZero(): boolean {
-        return this.magnitude.lessThan(0.01);
-    }
-
-    private generateKey(): string {
-        return Math.random().toString(36).substr(2, 9);
-    }
-}
-
-class ForceManager {
-    private forces: { [key: string]: Force } = {};
-
-    addForce({
-        direction,
-        magnitude,
-        key,
-    }: {
-        direction: Vector2;
-        magnitude: Decimal;
-        key?: string;
-    }): string {
-        // TODO: O força pode ser apenas um vector2, a magnitude estaria imbutida no vetor sem precisar passa-la como um parametro extra
-        const force = new Force(direction, magnitude, key);
-        this.forces[force.key] = force;
-        return force.key;
-    }
-
-    applyForces(frictions: FrictionForce): {
-        horizontalVelocity: Decimal;
-        verticalVelocity: Decimal;
-    } {
-        let totalForce = new Vector2(0, 0);
-
-        this.forces = Object.fromEntries(
-            Object.entries(this.forces).filter(([, force]) => {
-                if (!force.isZero()) {
-                    totalForce = totalForce.add(force.scale(frictions.horizontal));
-                    return true;
-                }
-                return false;
-            })
-        );
-
-        const horizontalVelocity = new Decimal(totalForce.x);
-        const verticalVelocity = new Decimal(totalForce.y);
-
-        return { horizontalVelocity, verticalVelocity };
-    }
-
-    removeForce(key: string) {
-        delete this.forces[key];
-    }
-}
+import { ForceManager } from "./force";
 
 /**
  * TODO O jogador não deve poder subir qualquer rampa, a pesar de que provavelmente no jogo não haverá nenhum caminho bloqueado... Será?
@@ -97,6 +27,18 @@ class ForceManager {
  *
  * TODO: Faz sentido definir uma força limite para o jogador? Assim poderiamos ter algo como uma aceleração
  * mas quem iria controlar isso? A fisica ou o controle? 🤔
+ *
+ * TODO: Se o player iniciar com os raycasts fora do chao ele precisa cair e seus raycasts entrarem no chao, atualmente
+ * quando ele iniciar com os raycasts fora do chao, quando os raycasts atingem o chao o player flutua pq a gravidade
+ * para de atuar quando o raycast atinge o chao
+ *
+ * TODO: O role do event listener poderia ser com uma classe separada de eventListener
+ * assim eu definiria um events.addEventListener e a declaracao na classe seria
+ * events = new Events() e dentro dela teria o eventListener, mas poderia ter, sei la
+ * os eventos disponiveis e etc num events.list ou algo assim
+ *
+ * TODO: Fazer o pulo funcionar usando forças, fazer a gravidade ser uma força contraria
+ * e funcionar a partir de uma força no controls
  */
 
 export class Physics {
@@ -119,7 +61,13 @@ export class Physics {
     private _groundedDistance!: Decimal;
     private _threshold = 0.001;
     private _gravity = new Decimal(1);
-    private _verticalSpeed = new Decimal(0);
+    private velocities: {
+        horizontalVelocity: Decimal;
+        verticalVelocity: Decimal;
+    } = {
+        horizontalVelocity: new Decimal(0),
+        verticalVelocity: new Decimal(0),
+    };
 
     forceManager = new ForceManager();
 
@@ -198,17 +146,23 @@ export class Physics {
 
     applyPhysics = () => {
         const prevGrounded = this._isGrounded;
-        const frictions = this.getFriction();
-        const velocities = this.forceManager.applyForces(frictions);
 
-        if (!this._isGrounded || !this._verticalSpeed.isZero()) {
+        if (!this._isGrounded || !this.velocities.verticalVelocity.isZero()) {
             this.applyGravity();
         }
 
         this.updateRaysPosition();
         this.checkGrounded();
         this.handleLand(prevGrounded);
-        this.movement(velocities.horizontalVelocity);
+        this.movement();
+
+        const frictions = this.getFriction();
+        this.velocities = this.forceManager.applyForces(frictions);
+
+        console.log({
+            horizontal: this.velocities.horizontalVelocity.toNumber(),
+            vertical: this.velocities.verticalVelocity.toNumber(),
+        });
     };
 
     getFriction = (): FrictionForce => {
@@ -260,10 +214,6 @@ export class Physics {
         const groundBackHit = this.scene.pickWithRay(this._groundBackRc, this.isGround);
         const groundBaseHit = this.scene.pickWithRay(this._baseRc, this.isGround);
 
-        if (!groundFrontHit || !groundBackHit || !groundBaseHit) {
-            throw new Error("[checkGrounded] Some raycast hit werent defined");
-        }
-
         /**
          *
          * TODO: Na mesma linha do nem tudo é chao, tambem precisamos ter uma tag
@@ -281,12 +231,12 @@ export class Physics {
     isOnGround = (
         groundFrontHit: Nullable<PickingInfo>,
         groundBackHit: Nullable<PickingInfo>,
-        baseHit: Nullable<PickingInfo>
+        groundBaseHit: Nullable<PickingInfo>
     ) => {
         let onGround = false;
 
-        if (groundFrontHit?.hit || groundBackHit?.hit || baseHit?.hit) {
-            const baseDistance = baseHit?.hit ? baseHit.distance : 0;
+        if (groundFrontHit?.hit || groundBackHit?.hit || groundBaseHit?.hit) {
+            const baseDistance = groundBaseHit?.hit ? groundBaseHit.distance : 0;
             const frontDistance = groundFrontHit?.hit ? groundFrontHit.distance : 0;
             const backDistance = groundBackHit?.hit ? groundBackHit.distance : 0;
 
@@ -311,25 +261,25 @@ export class Physics {
     willClipOnGround = (
         groundFrontHit: Nullable<PickingInfo>,
         groundBackHit: Nullable<PickingInfo>,
-        baseHit: Nullable<PickingInfo>
+        groundBaseHit: Nullable<PickingInfo>
     ) => {
         let willClip = false;
 
-        if (this.scene.deltaTime && !this._verticalSpeed.isZero()) {
-            const positionChange = this._verticalSpeed.times(
+        if (!this.velocities.verticalVelocity.isZero()) {
+            const positionChange = this.velocities.verticalVelocity.times(
                 new Decimal(this.scene.deltaTime).div(1000)
             );
             const feetPosition = this._groundedDistance.minus(this.prefab.mesh.base.position.y).neg();
             const nextFeetPosition = feetPosition.minus(positionChange);
 
-            if (baseHit && baseHit.pickedPoint) {
-                willClip = new Decimal(baseHit.pickedPoint.y).greaterThan(nextFeetPosition);
+            if (groundBaseHit && groundBaseHit?.pickedPoint) {
+                willClip = new Decimal(groundBaseHit.pickedPoint.y).greaterThan(nextFeetPosition);
             } else {
-                if (groundFrontHit && groundFrontHit.pickedPoint) {
+                if (groundFrontHit && groundFrontHit?.pickedPoint) {
                     willClip = new Decimal(groundFrontHit.pickedPoint.y).greaterThan(nextFeetPosition);
                 }
 
-                if (groundBackHit && groundBackHit.pickedPoint) {
+                if (groundBackHit && groundBackHit?.pickedPoint) {
                     willClip = new Decimal(groundBackHit.pickedPoint.y).greaterThan(nextFeetPosition);
                 }
             }
@@ -341,33 +291,29 @@ export class Physics {
     snapToGroundSurface = (
         groundFrontHit: Nullable<PickingInfo>,
         groundBackHit: Nullable<PickingInfo>,
-        baseHit: Nullable<PickingInfo>
+        groundBaseHit: Nullable<PickingInfo>
     ) => {
-        let playerPosition = null;
+        const playerPosition = new Decimal(this.prefab.mesh.base.position.y);
+        let distance: Decimal | null = null;
 
-        if (baseHit && baseHit.hit) {
-            const distance = new Decimal(baseHit.distance);
-            const prefabPositionY = new Decimal(this.prefab.mesh.base.position.y);
-            playerPosition = prefabPositionY.plus(this._groundedDistance.minus(distance)).toNumber();
+        if (groundBaseHit && groundBaseHit.hit) {
+            distance = new Decimal(groundBaseHit.distance);
         } else if (groundFrontHit && groundFrontHit.hit) {
-            const distance = new Decimal(groundFrontHit.distance);
-            const prefabPositionY = new Decimal(this.prefab.mesh.base.position.y);
-            playerPosition = prefabPositionY.plus(this._groundedDistance.minus(distance)).toNumber();
+            distance = new Decimal(groundFrontHit.distance);
         } else if (groundBackHit && groundBackHit.hit) {
-            const distance = new Decimal(groundBackHit.distance);
-            const prefabPositionY = new Decimal(this.prefab.mesh.base.position.y);
-            playerPosition = prefabPositionY.plus(this._groundedDistance.minus(distance)).toNumber();
+            distance = new Decimal(groundBackHit.distance);
         }
 
-        if (playerPosition) {
-            this.prefab.mesh.base.position.y = playerPosition;
+        if (distance) {
+            const newPosition = playerPosition.plus(this._groundedDistance.minus(distance));
+            this.prefab.mesh.base.position.y = newPosition.toNumber();
         }
     };
 
     handleLand = (prevGrounded: boolean) => {
         if (this._isGrounded && !prevGrounded) {
-            this._verticalSpeed = new Decimal(0);
-            this._events["on-land"]?.(this._verticalSpeed);
+            this.forceManager.removeForce("gravity");
+            this._events["on-land"]?.(this.velocities.verticalVelocity);
         }
     };
 
@@ -375,49 +321,36 @@ export class Physics {
         if (this.scene.deltaTime) {
             const deltaTime = new Decimal(this.scene.deltaTime).div(1000);
 
-            this._verticalSpeed = this._verticalSpeed.plus(this._gravity); // TODO: aplicar a gravidade como uma força de decaimento
+            this.forceManager.addOnForce("gravity", this._gravity, new Vector2(0, 1));
 
-            const positionChange = this._verticalSpeed.times(deltaTime);
+            const positionChange = this.velocities.verticalVelocity.times(deltaTime);
             this.prefab.mesh.base.position.y = new Decimal(this.prefab.mesh.base.position.y)
                 .minus(positionChange)
                 .toNumber();
         }
     };
 
-    // TODO: criar função de "pulo no ar" pode ser a mesma ou outra, mas precisa disso com uma força vindo de outra variavel
     jump = () => {
         if (this._isGrounded) {
             // TODO: essa força aqui tem q ser parametrizavel
-            this._verticalSpeed = new Decimal(-25);
-        }
-    };
-
-    // TODO: nao existe moveRight e moveLeft, existe um applyForce dado um botao apertado e isso que deve ser feito no lado do controller
-    moveRight = () => {
-        if (this.prefab.properties?.speed) {
             this.forceManager.addForce({
-                key: "movement",
-                direction: new Vector2(1, 0),
-                magnitude: this.prefab.properties.speed,
+                key: "jump",
+                direction: new Vector2(0, -1),
+                magnitude: new Decimal(25),
             });
         }
     };
 
-    moveLeft = () => {
-        if (this.prefab.properties?.speed) {
-            this.forceManager.addForce({
-                key: "movement",
-                direction: new Vector2(-1, 0),
-                magnitude: this.prefab.properties.speed,
-            });
-        }
-    };
-
-    movement = (horizontalVelocity: Decimal) => {
-        this._mapPoint += horizontalVelocity.toNumber();
+    movement = () => {
+        this._mapPoint += this.velocities.horizontalVelocity.toNumber();
         this.moveTo(this._mapPoint);
     };
 
+    /**
+     * TODO: quase ctz que aqui precisa ter um scene.deltaTime em
+     * algum lugar pra fazer o movimento ser constante independente
+     * do fps.
+     */
     moveTo = (point: number) => {
         if (!gameStore.map) return;
         const points = gameStore.map?.path.getPoints();
@@ -466,8 +399,6 @@ export class Physics {
         return prefabNextPoint;
     };
 
-    isGround = (mesh: AbstractMesh) => mesh.metadata?.type === GameObjectTypes.GROUND;
-
     calculateArcLength = (points: Vector3[], endIndex: number) => {
         let accumulatedLength = 0;
         for (let i = 0; i < endIndex; i++) {
@@ -475,6 +406,8 @@ export class Physics {
         }
         return accumulatedLength;
     };
+
+    isGround = (mesh: AbstractMesh) => mesh.metadata?.type === GameObjectTypes.GROUND;
 
     addEventListener = (event: keyof Events, cb: Events[keyof Events]) => {
         this._events[event] = cb;

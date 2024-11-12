@@ -25,18 +25,18 @@ export abstract class Prefab {
     protected _parent!: Mesh;
     protected _texture!: Texture;
     protected _sounds!: GenericObject<Sound>;
-    protected _physics!: Physics;
+    readonly physics: Nullable<Physics> = null;
 
     abstract properties: Nullable<CharacterProperties>;
     events: GenericObject = {};
     states: GenericObject = {};
 
     constructor(
-        public name: string,
-        protected readonly scene: Scene,
+        name: string,
+        readonly scene: Scene,
         physics = true
     ) {
-        if (physics) this._physics = new Physics(this, this.scene);
+        if (physics) this.physics = new Physics(this, this.scene);
     }
 
     abstract initSounds(): Promise<void>;
@@ -45,7 +45,7 @@ export abstract class Prefab {
         return this._mesh;
     }
 
-    set mesh(mesh: MeshGroup) {
+    protected set mesh(mesh: MeshGroup) {
         this._mesh = mesh;
     }
 

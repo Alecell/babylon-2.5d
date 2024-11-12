@@ -18,7 +18,7 @@ import { GameObjectTypes } from "../../types/enum";
 import Decimal from "decimal.js";
 import { Friction } from "../../utils/physics/friction";
 
-class Player extends Prefab {
+export class Player extends Prefab {
     private _controls!: Controls;
     private _camera!: Camera;
     private _animation!: Animation;
@@ -39,8 +39,8 @@ class Player extends Prefab {
 
         // this._camera = new Camera(this._mesh.base, this.scene);
         // this._animation = new Animation(this._skeleton, this.scedne);
-        this._controls = new Controls(this._mesh.base, this._animation, this._physics, this.scene);
-        this._physics.addEventListener("on-land", this.oi);
+        this._controls = new Controls(this);
+        this.physics?.addEventListener("on-land", this.oi);
     }
 
     oi = () => {
@@ -56,7 +56,7 @@ class Player extends Prefab {
         }, {} as MeshGroup);
 
         meshes.base = MeshBuilder.CreateCapsule("Player", { height: 4, radius: 1 }, this.scene);
-        // meshes.base.position = new Vector3(0, 20, 0);
+        // meshes.base.position = new Vector3(0, 200, 0);
         meshes.base.addChild(meshes["__root__"]);
         meshes["__root__"].scaling = new Vector3(-1, -1, -1);
         meshes["__root__"].position = new Vector3(0, -2, 0);

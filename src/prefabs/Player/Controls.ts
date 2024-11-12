@@ -1,19 +1,18 @@
-import { ActionEvent, ActionManager, ExecuteCodeAction, Mesh, Scene } from "@babylonjs/core";
-import { Animation } from "./Animation";
+import { ActionEvent, ActionManager, ExecuteCodeAction, Nullable, Vector2 } from "@babylonjs/core";
+import { Player } from "./Player";
 import { Physics } from "../../utils/physics/physics";
 
 export class Controls {
+    physics: Nullable<Physics>;
     input: {
         [key: string]: boolean;
     } = {};
     isJumping = false;
 
-    constructor(
-        private mesh: Mesh,
-        private animation: Animation,
-        private physics: Physics,
-        scene: Scene
-    ) {
+    constructor(private player: Player) {
+        const { scene } = this.player;
+        this.physics = this.player.physics;
+
         scene.actionManager = new ActionManager(scene);
 
         scene.actionManager.registerAction(
@@ -35,15 +34,23 @@ export class Controls {
 
     move = () => {
         if (this.input["a"]) {
-            this.physics.moveLeft();
+            this.physics?.forceManager.addForce({
+                key: "movement",
+                direction: new Vector2(-1, 0),
+                magnitude: this.player.properties.speed,
+            });
         } else if (this.input["d"]) {
-            this.physics.moveRight();
+            this.physics?.forceManager.addForce({
+                key: "movement",
+                direction: new Vector2(1, 0),
+                magnitude: this.player.properties.speed,
+            });
         }
     };
 
     jump = () => {
         if (this.input["w"]) {
-            this.physics.jump();
+            this.physics?.jump();
         }
     };
 }
