@@ -1,6 +1,7 @@
 import { ActionEvent, ActionManager, ExecuteCodeAction, Nullable, Vector2 } from "@babylonjs/core";
 import { Player } from "./Player";
 import { Physics } from "../../utils/physics/physics";
+import Decimal from "decimal.js";
 
 export class Controls {
     physics: Nullable<Physics>;
@@ -8,6 +9,7 @@ export class Controls {
         [key: string]: boolean;
     } = {};
     isJumping = false;
+    isGrounded: Nullable<boolean> = null;
 
     constructor(private player: Player) {
         const { scene } = this.player;
@@ -25,6 +27,10 @@ export class Controls {
         scene.onBeforeRenderObservable.add(() => {
             this.move();
             this.jump();
+        });
+
+        this.physics?.events.addListener("on-change-grounded", (isGrounded: boolean) => {
+            this.isGrounded = isGrounded;
         });
     }
 
@@ -49,8 +55,12 @@ export class Controls {
     };
 
     jump = () => {
-        if (this.input["w"]) {
-            this.physics?.jump();
+        if (this.input["w"] && this.isGrounded) {
+            this.physics?.forceManager.addForce({
+                key: "jump",
+                direction: new Vector2(0, -1),
+                magnitude: new Decimal(25),
+            });
         }
     };
 }

@@ -11,39 +11,35 @@ import {
 import Decimal from "decimal.js";
 
 import { Prefab } from "../../interfaces/prefab";
-import { Events, FrictionForce, Positions } from "./physics.types";
+import { FrictionForce, PhysicsEvents, Positions, PrevState, Velocities } from "./physics.types";
 import { gameStore } from "../../store/game";
 import { createRay, getPosition } from "./raycast";
 import { GameObjectTypes } from "../../types/enum";
 import { Friction } from "./friction";
 import { ForceManager } from "./force";
+import { Events } from "../events/events";
 
 /**
  * TODO O jogador não deve poder subir qualquer rampa, a pesar de que provavelmente no jogo não haverá nenhum caminho bloqueado... Será?
  *
  * TODO: os raycasts laterais precisam sempre apontar para a direção do chao seja pra frente ou pra tras
  *
- * TODO: Trocar todos os numbers para Decimal
+ * TODO: Trocar todos os numbers para Decimal // decimal é ruim, talvez usar tudo como number seja mais ideal
  *
  * TODO: Faz sentido definir uma força limite para o jogador? Assim poderiamos ter algo como uma aceleração
- * mas quem iria controlar isso? A fisica ou o controle? 🤔
+ * mas quem iria controlar isso? A fisica ou o controle? Talvez na classe Force poderia
+ * ter uma propriedade chamada "max" ou "limit" que determina o limite da magnitude da força em questão.
+ * Vinculado ao ID da força
  *
  * TODO: Se o player iniciar com os raycasts fora do chao ele precisa cair e seus raycasts entrarem no chao, atualmente
  * quando ele iniciar com os raycasts fora do chao, quando os raycasts atingem o chao o player flutua pq a gravidade
- * para de atuar quando o raycast atinge o chao
- *
- * TODO: O role do event listener poderia ser com uma classe separada de eventListener
- * assim eu definiria um events.addEventListener e a declaracao na classe seria
- * events = new Events() e dentro dela teria o eventListener, mas poderia ter, sei la
- * os eventos disponiveis e etc num events.list ou algo assim
- *
- * TODO: Fazer o pulo funcionar usando forças, fazer a gravidade ser uma força contraria
- * e funcionar a partir de uma força no controls
+ * para de atuar quando o raycast atinge o chao. Isso tambem é um problema se o player colocar
+ * o raycast fora do chao caso ele suba muito.
  */
 
 export class Physics {
     private _mapPoint = 0;
-    private _events: Partial<Events> = {};
+    readonly events = new Events<PhysicsEvents>();
 
     private _baseRc!: Ray;
     private _frontRc!: Ray;
@@ -61,13 +57,11 @@ export class Physics {
     private _groundedDistance!: Decimal;
     private _threshold = 0.001;
     private _gravity = new Decimal(1);
-    private velocities: {
-        horizontalVelocity: Decimal;
-        verticalVelocity: Decimal;
-    } = {
+    private velocities: Velocities = {
         horizontalVelocity: new Decimal(0),
         verticalVelocity: new Decimal(0),
     };
+    private prevStates: Partial<PrevState> = {};
 
     forceManager = new ForceManager();
 
@@ -145,7 +139,7 @@ export class Physics {
     };
 
     applyPhysics = () => {
-        const prevGrounded = this._isGrounded;
+        this.registerPrevStates();
 
         if (!this._isGrounded || !this.velocities.verticalVelocity.isZero()) {
             this.applyGravity();
@@ -153,16 +147,10 @@ export class Physics {
 
         this.updateRaysPosition();
         this.checkGrounded();
-        this.handleLand(prevGrounded);
         this.movement();
 
         const frictions = this.getFriction();
         this.velocities = this.forceManager.applyForces(frictions);
-
-        console.log({
-            horizontal: this.velocities.horizontalVelocity.toNumber(),
-            vertical: this.velocities.verticalVelocity.toNumber(),
-        });
     };
 
     getFriction = (): FrictionForce => {
@@ -226,6 +214,12 @@ export class Physics {
             this._isGrounded = true;
             this.snapToGroundSurface(groundFrontHit, groundBackHit, groundBaseHit);
         }
+
+        if (this._isGrounded !== this.prevStates.isGrounded) {
+            this.events.emit?.("on-change-grounded", this._isGrounded);
+        }
+
+        this.handleLand();
     };
 
     isOnGround = (
@@ -310,10 +304,11 @@ export class Physics {
         }
     };
 
-    handleLand = (prevGrounded: boolean) => {
-        if (this._isGrounded && !prevGrounded) {
+    // TODO: talvez essa função deva estar no checkGrounded
+    handleLand = () => {
+        if (this._isGrounded && !this.prevStates.isGrounded) {
             this.forceManager.removeForce("gravity");
-            this._events["on-land"]?.(this.velocities.verticalVelocity);
+            this.events.emit?.("on-land", this.velocities.verticalVelocity);
         }
     };
 
@@ -409,7 +404,10 @@ export class Physics {
 
     isGround = (mesh: AbstractMesh) => mesh.metadata?.type === GameObjectTypes.GROUND;
 
-    addEventListener = (event: keyof Events, cb: Events[keyof Events]) => {
-        this._events[event] = cb;
+    registerPrevStates = () => {
+        this.prevStates = {
+            isGrounded: this._isGrounded,
+            velocities: this.velocities,
+        };
     };
 }

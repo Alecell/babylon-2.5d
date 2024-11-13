@@ -40,7 +40,7 @@ export class Player extends Prefab {
         // this._camera = new Camera(this._mesh.base, this.scene);
         // this._animation = new Animation(this._skeleton, this.scedne);
         this._controls = new Controls(this);
-        this.physics?.addEventListener("on-land", this.oi);
+        this.physics?.events.addListener("on-land", this.oi);
     }
 
     oi = () => {
